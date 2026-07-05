@@ -967,6 +967,7 @@ function renderManage() {
         <li class="manage-item">
           <form class="edit-form" data-action-submit="save-project" data-id="${p.id}">
             <input type="text" name="name" value="${esc(p.name)}" required>
+            <input type="text" name="customId" value="${esc(p.customId || '')}" placeholder="ID(任意)">
             <select name="clientId">${clientOpts(p.clientId)}</select>
             <input type="color" name="color" value="${p.color}" title="カラー">
             <button class="btn btn-primary" type="submit">保存</button>
@@ -980,6 +981,7 @@ function renderManage() {
       <li class="manage-item">
         <span class="chip-dot" style="background:${p.color}"></span>
         <span class="name">${esc(p.name)}</span>
+        ${p.customId ? `<span class="chip">${esc(p.customId)}</span>` : ''}
         <span class="sub">${client ? esc(client.name) : 'クライアントなし'} ・ ${count} タスク</span>
         <button class="btn-icon" data-action="edit-project" data-id="${p.id}" title="編集">✎</button>
         <button class="btn-icon danger" data-action="del-project" data-id="${p.id}" title="削除">🗑</button>
@@ -1002,6 +1004,7 @@ function renderManage() {
         <h2>📁 プロジェクト</h2>
         <form class="add-form" data-action-submit="add-project" style="margin-bottom:12px">
           <input type="text" name="name" placeholder="プロジェクト名..." required autocomplete="off">
+          <input type="text" name="customId" placeholder="ID(任意)" autocomplete="off">
           <select name="clientId">${clientOpts('')}</select>
           <button class="btn btn-primary" type="submit">追加</button>
         </form>
@@ -1266,6 +1269,7 @@ document.addEventListener('submit', (ev) => {
       data.projects.push({
         id: uid(),
         name,
+        customId: String(fd.get('customId') || '').trim() || null,
         clientId: fd.get('clientId') || null,
         color: PALETTE[data.projects.length % PALETTE.length],
       });
@@ -1276,6 +1280,7 @@ document.addEventListener('submit', (ev) => {
       if (!p) return;
       const name = String(fd.get('name')).trim();
       if (name) p.name = name;
+      p.customId = String(fd.get('customId') || '').trim() || null;
       p.clientId = fd.get('clientId') || null;
       p.color = String(fd.get('color')) || p.color;
       clearEditing();
