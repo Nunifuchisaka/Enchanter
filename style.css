@@ -432,6 +432,77 @@ details.done-section summary {
   padding: 4px 0;
 }
 
+.task-note {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: var(--text-sub);
+  margin: 2px 0;
+}
+
+.estimate-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-sub);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.estimate-input input {
+  width: 68px;
+}
+
+.edit-form textarea {
+  flex-basis: 100%;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  resize: vertical;
+}
+
+.edit-form textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.estimate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.estimate .progress {
+  display: inline-block;
+  width: 72px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.estimate .progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.estimate.over .progress-fill {
+  background: var(--danger);
+}
+
+.estimate .over-note {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 /* ---------- timeline ---------- */
 
 .tl-header {
@@ -450,6 +521,17 @@ details.done-section summary {
 
 .tl-total {
   color: var(--text-sub);
+}
+
+.tl-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.tl-summary .chip b {
+  font-variant-numeric: tabular-nums;
 }
 
 .timeline-wrap {
@@ -730,6 +812,12 @@ details.done-section summary {
   font-size: 13px;
 }
 
+.export-btns {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .report-total {
   font-size: 22px;
   font-weight: 700;
@@ -828,4 +916,42 @@ input[type="color"] {
   height: 30px;
   padding: 2px;
   cursor: pointer;
+}
+
+.backup-note {
+  font-size: 12px;
+  color: var(--text-sub);
+  margin-bottom: 12px;
+}
+
+.backup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.file-btn {
+  display: inline-flex;
+  align-items: center;
+}
+
+.shortcut-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  text-align: center;
+  padding: 1px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
 }

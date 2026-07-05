@@ -35,6 +35,11 @@ function sanitizeData(d) {
     tasks: (d.tasks || []).map((t) => ({
       ...t,
       repeat: REPEAT_VALUES.has(t.repeat) ? t.repeat : null,
+      // estimateMinutesはvalue属性に埋め込まれるため正の整数のみ許可
+      estimateMinutes: Number.isFinite(t.estimateMinutes) && t.estimateMinutes > 0
+        ? Math.round(t.estimateMinutes)
+        : null,
+      note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
     })),
     entries: d.entries || [],
   };

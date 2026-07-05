@@ -288,6 +288,12 @@ function planLabel(t) {
   return `${sDate}${sTime}〜${eDate}${eTime}`;
 }
 
+// フォームの見積(分)入力を正の整数またはnullに正規化
+function parseEstimate(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
 // 指定日において、タスクの開始/終了のうちその日にあたる側に時刻指定があるか
 function hasTimeOnDay(t, day) {
   return (t.plannedStart === day && !!t.plannedStartTime) || (t.plannedEnd === day && !!t.plannedEndTime);
@@ -333,6 +339,8 @@ function nextOccurrence(t) {
     plannedStartTime: t.plannedStartTime || null,
     plannedEndTime: t.plannedEndTime || null,
     repeat: t.repeat,
+    estimateMinutes: t.estimateMinutes || null,
+    note: t.note || null,
   };
 }
 
@@ -443,6 +451,71 @@ function projectChip(projectId) {
   return `<span class="chip"><span class="chip-dot" style="background:${color}"></span>${esc(projectLabel(projectId))}</span>`;
 }
 
+// 累計時間の表示(見積があれば「累計/見積」+進捗バー、超過時は警告色)
+function totalChip(t, totalMs) {
+  if (!t.estimateMinutes) {
+    return totalMs > 0 ? `<span>累計 ${fmtDur(totalMs)}</span>` : '';
+  }
+  const estMs = t.estimateMinutes * 60000;
+  const pct = (totalMs / estMs) * 100;
+  return `
+    <span class="estimate${pct > 100 ? ' over' : ''}">
+      累計 ${fmtDur(totalMs)} / 見積 ${fmtDur(estMs)}
+      <span class="progress"><span class="progress-fill" style="width:${Math.min(100, pct).toFixed(1)}%"></span></span>
+      ${pct > 100 ? `<span class="over-note">+${fmtDur(totalMs - estMs)} 超過</span>` : ''}
+    </span>`;
+}
+
+/* ----- URLハッシュ(タブ状態の保存/復元) ----- */
+
+const HASH_TABS = ['todo', 'timeline', 'gantt', 'report', 'manage'];
+const HASH_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// 現在のuiから「#タブ?パラメータ」形式のハッシュを作る(タブごとに意味のある値のみ)
+function buildHash() {
+  const params = new URLSearchParams();
+  if (ui.tab === 'timeline') {
+    params.set('date', ui.timelineDate);
+  } else if (ui.tab === 'gantt') {
+    params.set('view', ui.ganttView);
+    if (ui.ganttView === 'day') {
+      params.set('date', ui.ganttDate);
+    } else {
+      params.set('start', ui.ganttStart);
+      params.set('days', ui.ganttDays);
+    }
+  } else if (ui.tab === 'report') {
+    params.set('from', ui.aggFrom);
+    params.set('to', ui.aggTo);
+  }
+  const qs = params.toString();
+  return `#${ui.tab}${qs ? `?${qs}` : ''}`;
+}
+
+// location.hashを検証しつつuiへ反映する(不正な値は無視して現状維持)
+function applyHash() {
+  const hash = decodeURIComponent(location.hash.replace(/^#/, ''));
+  if (!hash) return;
+  const [tab, qs] = hash.split('?');
+  if (!HASH_TABS.includes(tab)) return;
+  ui.tab = tab;
+  const params = new URLSearchParams(qs || '');
+  const date = params.get('date');
+  if (tab === 'timeline' && HASH_DATE_RE.test(date || '')) {
+    ui.timelineDate = date;
+  } else if (tab === 'gantt') {
+    const view = params.get('view');
+    if (view === 'day' || view === 'week') ui.ganttView = view;
+    if (HASH_DATE_RE.test(date || '')) ui.ganttDate = date;
+    if (HASH_DATE_RE.test(params.get('start') || '')) ui.ganttStart = params.get('start');
+    if ([14, 28, 56].includes(Number(params.get('days')))) ui.ganttDays = Number(params.get('days'));
+  } else if (tab === 'report') {
+    if (HASH_DATE_RE.test(params.get('from') || '')) ui.aggFrom = params.get('from');
+    if (HASH_DATE_RE.test(params.get('to') || '')) ui.aggTo = params.get('to');
+    if (ui.aggFrom > ui.aggTo) ui.aggTo = ui.aggFrom;
+  }
+}
+
 function renderAll() {
   renderRunningBox();
   document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -454,6 +527,9 @@ function renderAll() {
   else if (ui.tab === 'gantt') view.innerHTML = renderGantt();
   else if (ui.tab === 'report') view.innerHTML = renderReport();
   else view.innerHTML = renderManage();
+  // 全ての状態変更はここを通るので、URLへの反映はこの1箇所だけでよい
+  // (replaceStateはhashchangeを発火しないのでループしない)
+  history.replaceState(null, '', location.pathname + location.search + buildHash());
 }
 
 function renderRunningBox() {
@@ -504,6 +580,10 @@ function renderTodo() {
               <input type="time" name="plannedEndTime" step="600" value="${t.plannedEndTime || ''}">
             </span>
             <select name="repeat">${repeatOptions(t.repeat || '')}</select>
+            <span class="estimate-input">見積
+              <input type="number" name="estimateMinutes" min="0" value="${t.estimateMinutes || ''}" placeholder="--">分
+            </span>
+            <textarea name="note" rows="2" placeholder="メモ(任意)">${esc(t.note || '')}</textarea>
             <button class="btn btn-primary" type="submit">保存</button>
             <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
           </form>
@@ -537,11 +617,12 @@ function renderTodo() {
         <input type="checkbox" ${t.done ? 'checked' : ''} data-action-change="toggle-done" data-id="${t.id}">
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
+          ${t.note ? `<div class="task-note">${esc(t.note)}</div>` : ''}
           <div class="task-meta">
             ${projectChip(t.projectId)}
             ${planChip(t)}
             ${repeatChip(t)}
-            ${totalMs > 0 ? `<span>累計 ${fmtDur(totalMs)}</span>` : ''}
+            ${totalChip(t, totalMs)}
           </div>
         </div>
         <div class="task-actions">
@@ -579,6 +660,9 @@ function renderTodo() {
           <input type="time" name="plannedEndTime" step="600">
         </span>
         <select name="repeat">${repeatOptions('')}</select>
+        <span class="estimate-input">見積
+          <input type="number" name="estimateMinutes" min="0" placeholder="--">分
+        </span>
         <button class="btn btn-primary" type="submit">追加</button>
       </form>
     </div>
@@ -662,6 +746,19 @@ function renderTimeline() {
   const totalMs = items.reduce((sum, e) => sum + (e.clipEnd - e.clipStart), 0);
   const laneCount = Math.max(1, assignLanes(items));
 
+  // この日のプロジェクト別内訳(時間の多い順)
+  const byProject = new Map();
+  for (const e of items) {
+    const task = taskById(e.taskId);
+    const pid = task && projectById(task.projectId) ? task.projectId : '';
+    byProject.set(pid, (byProject.get(pid) || 0) + (e.clipEnd - e.clipStart));
+  }
+  const summary = items.length ? `
+    <div class="tl-summary">${[...byProject.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([pid, ms]) => `<span class="chip"><span class="chip-dot" style="background:${projectColor(pid)}"></span>${esc(projectLabel(pid))} <b>${fmtDur(ms)}</b></span>`)
+      .join('')}</div>` : '';
+
   const blocks = items.map((e) => {
     const task = taskById(e.taskId);
     const top = ((e.clipStart - dayStart) / 86400000) * 100;
@@ -717,6 +814,7 @@ function renderTimeline() {
         <button class="btn" data-action="tl-shift" data-days="1">翌日 ▶</button>
         <button class="btn" data-action="tl-today">今日</button>
       </div>
+      ${summary}
       ${renderPlannedForDay(ui.timelineDate)}
       <div class="timeline-wrap">
         <div class="timeline">
@@ -912,6 +1010,106 @@ function renderGanttWeek() {
     </div>`;
 }
 
+/* ----- エクスポート(CSV・バックアップ) ----- */
+
+function csvEscape(v) {
+  const s = String(v == null ? '' : v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// 先頭のBOMはExcelでの文字化け対策
+function toCsv(rows) {
+  return '\uFEFF' + rows.map((r) => r.map(csvEscape).join(',')).join('\r\n') + '\r\n';
+}
+
+function downloadFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// 集計タブの階層集計をフラットなCSVにして保存する
+function exportReportCsv() {
+  const tree = aggregate(ui.aggFrom, ui.aggTo);
+  const rows = [['クライアント', 'プロジェクト', 'タスク', '時間(分)', '時間(h)']];
+  const sortedClients = [...tree.entries()].sort((a, b) => b[1].total - a[1].total);
+  for (const [clientId, cNode] of sortedClients) {
+    const client = clientById(clientId);
+    const sortedProjects = [...cNode.projects.entries()].sort((a, b) => b[1].total - a[1].total);
+    for (const [projectId, pNode] of sortedProjects) {
+      const project = projectById(projectId);
+      for (const t of [...pNode.tasks].sort((a, b) => b.ms - a.ms)) {
+        rows.push([
+          client ? client.name : 'クライアントなし',
+          project ? project.name : 'プロジェクトなし',
+          t.title,
+          Math.round(t.ms / 60000),
+          (t.ms / 3600000).toFixed(2),
+        ]);
+      }
+    }
+  }
+  downloadFile(`enchanter-report_${ui.aggFrom}_${ui.aggTo}.csv`, toCsv(rows), 'text/csv');
+}
+
+// 期間内の作業記録の明細CSV(期間でクリップするので集計と合計が一致する)
+function exportEntriesCsv() {
+  const now = Date.now();
+  const rangeStart = fromDateStr(ui.aggFrom).getTime();
+  const rangeEnd = fromDateStr(ui.aggTo).getTime() + 86400000;
+  const rows = [['日付', '開始', '終了', '時間(分)', 'タスク', 'プロジェクト', 'クライアント']];
+  for (const e of [...data.entries].sort((a, b) => a.start - b.start)) {
+    const effEnd = e.end === null ? now : e.end;
+    const clipStart = Math.max(e.start, rangeStart);
+    const clipEnd = Math.min(effEnd, rangeEnd);
+    if (clipEnd <= clipStart) continue;
+    const task = taskById(e.taskId);
+    const project = task ? projectById(task.projectId) : null;
+    const client = project ? clientById(project.clientId) : null;
+    rows.push([
+      toDateStr(new Date(clipStart)),
+      fmtTime(clipStart),
+      e.end === null ? '計測中' : fmtTime(clipEnd),
+      Math.round((clipEnd - clipStart) / 60000),
+      task ? task.title : '(削除済みタスク)',
+      project ? project.name : '',
+      client ? client.name : '',
+    ]);
+  }
+  downloadFile(`enchanter-entries_${ui.aggFrom}_${ui.aggTo}.csv`, toCsv(rows), 'text/csv');
+}
+
+// バックアップJSONを読み込み、確認のうえ全データを置き換える
+function importBackup(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result));
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid shape');
+      for (const key of ['clients', 'projects', 'tasks', 'entries']) {
+        if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error('invalid shape');
+      }
+      const next = normalize(parsed);
+      const msg = '現在のデータをインポート内容で【全て置き換え】ます。\n'
+        + `現在: タスク ${data.tasks.length} 件・作業記録 ${data.entries.length} 件\n`
+        + `インポート: タスク ${next.tasks.length} 件・作業記録 ${next.entries.length} 件\n`
+        + 'よろしいですか?';
+      if (!confirm(msg)) return;
+      data = next;
+      save();
+      renderAll();
+    } catch (e) {
+      console.error('バックアップの読み込みに失敗しました', e);
+      alert('バックアップファイルを読み込めませんでした。エクスポートしたJSONファイルか確認してください。');
+    }
+  };
+  reader.readAsText(file);
+}
+
 /* ----- 集計タブ ----- */
 
 function aggregate(fromStr, toStr) {
@@ -996,6 +1194,10 @@ function renderReport() {
         <button class="btn" data-action="quick-range" data-range="lastweek">先週</button>
         <button class="btn" data-action="quick-range" data-range="month">今月</button>
         <button class="btn" data-action="quick-range" data-range="lastmonth">先月</button>
+        <span class="export-btns">
+          <button class="btn" data-action="export-report-csv" title="集計結果をCSVでダウンロード">⬇ 集計CSV</button>
+          <button class="btn" data-action="export-entries-csv" title="作業記録の明細をCSVでダウンロード">⬇ 明細CSV</button>
+        </span>
       </div>
       <div class="report-total">${fmtDur(grandTotal)}<small>(${hours}h) ${fmtDateJa(ui.aggFrom)} 〜 ${fmtDateJa(ui.aggTo)}</small></div>
       ${rows.length ? `
@@ -1087,6 +1289,26 @@ function renderManage() {
       </div>`;
   };
 
+  const backupCard = () => `
+    <div class="card">
+      <h2>💾 バックアップ</h2>
+      <p class="backup-note">全データ(クライアント・プロジェクト・タスク・作業記録)をJSONで書き出し/読み込みできます。インポートは現在のデータを全て置き換えます。</p>
+      <div class="backup-actions">
+        <button class="btn" data-action="export-backup">⬇ エクスポート</button>
+        <label class="btn file-btn">⬆ インポート<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
+      </div>
+    </div>`;
+
+  const shortcutCard = () => `
+    <div class="card">
+      <h2>⌨️ キーボードショートカット</h2>
+      <ul class="shortcut-list">
+        <li><kbd>1</kbd>〜<kbd>5</kbd> タブ切替(Todo / タイムライン / ガント / 集計 / 管理)</li>
+        <li><kbd>N</kbd> 新しいタスクを追加(Todoタブのタスク名入力へ)</li>
+        <li><kbd>Esc</kbd> 編集をキャンセル</li>
+      </ul>
+    </div>`;
+
   return `
     <div class="manage-grid">
       <div class="card">
@@ -1112,6 +1334,8 @@ function renderManage() {
         </ul>
       </div>
       ${googleCard()}
+      ${backupCard()}
+      ${shortcutCard()}
     </div>`;
 }
 
@@ -1182,6 +1406,15 @@ document.addEventListener('click', (ev) => {
       return;
     case 'google-disconnect':
       disconnectGoogle();
+      return;
+    case 'export-report-csv':
+      exportReportCsv();
+      return;
+    case 'export-entries-csv':
+      exportEntriesCsv();
+      return;
+    case 'export-backup':
+      downloadFile(`enchanter-backup-${toDateStr(new Date())}.json`, JSON.stringify(data, null, 2), 'application/json');
       return;
     case 'tl-shift': {
       const d = fromDateStr(ui.timelineDate);
@@ -1272,6 +1505,12 @@ document.addEventListener('change', (ev) => {
     case 'todo-filter':
       ui.todoFilterProject = el.value;
       break;
+    case 'import-backup': {
+      const file = el.files && el.files[0];
+      el.value = '';
+      if (file) importBackup(file); // 確認・保存・再描画はimportBackup側で行う
+      return;
+    }
     case 'tl-date':
       if (el.value) ui.timelineDate = el.value;
       break;
@@ -1319,6 +1558,8 @@ document.addEventListener('submit', (ev) => {
         createdAt: Date.now(),
         completedAt: null,
         repeat: fd.get('repeat') || null,
+        estimateMinutes: parseEstimate(fd.get('estimateMinutes')),
+        note: null,
         ...planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')),
       });
       break;
@@ -1330,6 +1571,8 @@ document.addEventListener('submit', (ev) => {
       if (title) t.title = title;
       t.projectId = fd.get('projectId') || null;
       t.repeat = fd.get('repeat') || null;
+      t.estimateMinutes = parseEstimate(fd.get('estimateMinutes'));
+      t.note = String(fd.get('note') || '').trim() || null;
       Object.assign(t, planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')));
       clearEditing();
       break;
@@ -1417,6 +1660,40 @@ document.addEventListener('submit', (ev) => {
   if (syncEntry) syncEntryToGoogle(syncEntry);
 });
 
+// 戻る/進むやハッシュの手入力に追従する(renderAll内のreplaceStateでは発火しない)
+window.addEventListener('hashchange', () => {
+  applyHash();
+  renderAll();
+});
+
+const SHORTCUT_TABS = { 1: 'todo', 2: 'timeline', 3: 'gantt', 4: 'report', 5: 'manage' };
+
+document.addEventListener('keydown', (ev) => {
+  if (ev.isComposing) return; // 日本語入力の変換中は無視
+  if (ev.key === 'Escape') {
+    if (ui.editingTask || ui.editingEntry || ui.editingClient || ui.editingProject) {
+      clearEditing();
+      renderAll();
+    }
+    return;
+  }
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const t = ev.target;
+  if (t.matches && t.matches('input, textarea, select') || t.isContentEditable) return;
+  if (SHORTCUT_TABS[ev.key]) {
+    ui.tab = SHORTCUT_TABS[ev.key];
+    clearEditing();
+    renderAll();
+  } else if (ev.key === 'n' || ev.key === 'N') {
+    ev.preventDefault();
+    ui.tab = 'todo';
+    clearEditing();
+    renderAll();
+    const input = document.querySelector('.add-form input[name="title"]');
+    if (input) input.focus();
+  }
+});
+
 // "HH:MM" → タイムスタンプ(dayStart基準)
 function timeToTs(dayStart, hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
@@ -1466,6 +1743,7 @@ async function init() {
   } catch (e) {
     console.error('Google連携状態の取得に失敗しました', e);
   }
+  applyHash();
   const params = new URLSearchParams(location.search);
   if (params.has('google')) {
     ui.tab = 'manage';

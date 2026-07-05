@@ -27,7 +27,7 @@ Four files make up the whole app, each with exactly one job:
 
 There's no login/session system — the trust boundary is "whoever can reach the port." Two mechanisms enforce that boundary and must be preserved when touching `server.js`/`app.js`:
 - Any state-changing endpoint (`PUT /api/data`, `POST /api/google/disconnect`, `POST /api/calendar/sync-entry`) requires the `X-Requested-With: enchanter` header (checked via `requireCsrfHeader()`). This forces a CORS preflight on every request regardless of method; since the server never answers `OPTIONS` or sends `Access-Control-Allow-Origin`, a browser visiting a malicious page can't trigger these endpoints (drive-by CSRF). New mutating endpoints must call `requireCsrfHeader()`, and any new `fetch()` call to them in `app.js` must send that header.
-- `PUT /api/data` (and `readData()` on load) runs the payload through `sanitizeData()`, which forces `project.color` to match `/^#[0-9a-fA-F]{6}$/` and `task.repeat` to one of `daily`/`weekly`/`monthly`/`null`. These two fields are rendered unescaped into `style="background:..."` / `value="..."` attributes client-side, so a crafted API payload or hand-edited `data/enchanter-data.json` could otherwise break out of the attribute. Any new enum-like field rendered into an HTML attribute needs the same treatment (either server-side validation or `esc()` on the client).
+- `PUT /api/data` (and `readData()` on load) runs the payload through `sanitizeData()`, which forces `project.color` to match `/^#[0-9a-fA-F]{6}$/`, `task.repeat` to one of `daily`/`weekly`/`monthly`/`null`, and `task.estimateMinutes` to a positive integer or `null` (`task.note` is coerced to string/`null` but otherwise passed through — it's always rendered via `esc()`). Fields like `color`/`estimateMinutes` are rendered unescaped into `style="background:..."` / `value="..."` attributes client-side, so a crafted API payload or hand-edited `data/enchanter-data.json` could otherwise break out of the attribute. Any new enum-like field rendered into an HTML attribute needs the same treatment (either server-side validation or `esc()` on the client).
 
 ### Client state shape
 
@@ -52,7 +52,7 @@ When adding a new interactive control, follow this convention: add a `data-actio
 
 ### Tabs
 
-Each tab (`todo`, `timeline`, `gantt`, `report`, `manage`) is an independent `render*` function producing a full HTML string for `#view`; switching tabs just changes `ui.tab` and calls `renderAll()`. There's no routing/history integration — tab state resets to `todo` on reload.
+Each tab (`todo`, `timeline`, `gantt`, `report`, `manage`) is an independent `render*` function producing a full HTML string for `#view`; switching tabs just changes `ui.tab` and calls `renderAll()`. Tab state (plus the active tab's dates/ranges) is mirrored into the URL hash (`#timeline?date=...`) by `buildHash()`, applied once at the end of `renderAll()` via `history.replaceState` — since every state change goes through `renderAll()`, no per-mutation hash updates are needed. `applyHash()` (called at `init()` and on `hashchange`) parses and validates the hash back into `ui`, so reload/bookmarks/back-forward restore the view.
 
 ### Editing pattern
 
