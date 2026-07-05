@@ -23,8 +23,10 @@ let data = { clients: [], projects: [], tasks: [], entries: [] };
 const ui = {
   tab: 'todo',
   timelineDate: toDateStr(new Date()),
+  ganttView: 'week',
   ganttStart: toDateStr(startOfWeek(new Date())),
   ganttDays: 28,
+  ganttDate: toDateStr(new Date()),
   aggFrom: toDateStr(startOfWeek(new Date())),
   aggTo: toDateStr(new Date()),
   todoFilterProject: '',
@@ -200,14 +202,78 @@ function fmtShortDate(s) {
   return `${y}${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-// フォーム入力の予定日程を正規化(片方だけなら同日、逆順なら入れ替え)
-function planRange(ps, pe) {
-  let start = ps || null;
-  let end = pe || null;
-  if (!start && end) start = end;
-  if (start && !end) end = start;
-  if (start && end && end < start) [start, end] = [end, start];
-  return { plannedStart: start, plannedEnd: end };
+// フォーム入力の予定日程(+時刻)を正規化(片方だけなら同日、逆順なら入れ替え)
+function planRange(ps, pe, pts, pte) {
+  let start = { date: ps || null, time: pts || null };
+  let end = { date: pe || null, time: pte || null };
+  if (!start.date && end.date) start = { ...end };
+  if (start.date && !end.date) end = { ...start };
+  const reversed = start.date && end.date && (
+    end.date < start.date ||
+    (end.date === start.date && start.time && end.time && end.time < start.time)
+  );
+  if (reversed) [start, end] = [end, start];
+  return { plannedStart: start.date, plannedEnd: end.date, plannedStartTime: start.time, plannedEndTime: end.time };
+}
+
+// 予定日時のラベル("7/5" / "7/5 14:00" / "7/5〜7/6" / "7/5 14:00〜15:00")
+function planLabel(t) {
+  const sDate = fmtShortDate(t.plannedStart);
+  const eDate = fmtShortDate(t.plannedEnd);
+  const sTime = t.plannedStartTime ? ` ${t.plannedStartTime}` : '';
+  const eTime = t.plannedEndTime ? ` ${t.plannedEndTime}` : '';
+  if (t.plannedStart === t.plannedEnd) {
+    return t.plannedStartTime && t.plannedEndTime ? `${sDate}${sTime}〜${t.plannedEndTime}` : `${sDate}${sTime}`;
+  }
+  return `${sDate}${sTime}〜${eDate}${eTime}`;
+}
+
+// 指定日において、タスクの開始/終了のうちその日にあたる側に時刻指定があるか
+function hasTimeOnDay(t, day) {
+  return (t.plannedStart === day && !!t.plannedStartTime) || (t.plannedEnd === day && !!t.plannedEndTime);
+}
+
+const REPEAT_LABELS = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
+
+function repeatOptions(selected) {
+  let html = '<option value="">繰り返しなし</option>';
+  for (const [value, label] of Object.entries(REPEAT_LABELS)) {
+    html += `<option value="${value}"${value === selected ? ' selected' : ''}>🔁 ${label}</option>`;
+  }
+  return html;
+}
+
+function repeatChip(t) {
+  if (!t.repeat) return '';
+  return `<span class="chip">🔁 ${REPEAT_LABELS[t.repeat] || t.repeat}</span>`;
+}
+
+// 予定日を繰り返し単位ぶんだけ先送りする
+function shiftDate(dateStr, repeat) {
+  const d = fromDateStr(dateStr);
+  if (repeat === 'daily') d.setDate(d.getDate() + 1);
+  else if (repeat === 'weekly') d.setDate(d.getDate() + 7);
+  else if (repeat === 'monthly') d.setMonth(d.getMonth() + 1);
+  return toDateStr(d);
+}
+
+// 繰り返しタスクの完了時に、次回分のタスクを複製生成する
+function nextOccurrence(t) {
+  const plannedStart = t.plannedStart ? shiftDate(t.plannedStart, t.repeat) : null;
+  const plannedEnd = t.plannedEnd ? shiftDate(t.plannedEnd, t.repeat) : plannedStart;
+  return {
+    id: uid(),
+    title: t.title,
+    projectId: t.projectId,
+    done: false,
+    createdAt: Date.now(),
+    completedAt: null,
+    plannedStart,
+    plannedEnd,
+    plannedStartTime: t.plannedStartTime || null,
+    plannedEndTime: t.plannedEndTime || null,
+    repeat: t.repeat,
+  };
 }
 
 /* ---------- mutations ---------- */
@@ -305,10 +371,7 @@ function planChip(t) {
       cls = ' plan-today';
     }
   }
-  const label = t.plannedStart === t.plannedEnd
-    ? fmtShortDate(t.plannedStart)
-    : `${fmtShortDate(t.plannedStart)}〜${fmtShortDate(t.plannedEnd)}`;
-  return `<span class="chip${cls}">📅 ${label}${note}</span>`;
+  return `<span class="chip${cls}">📅 ${planLabel(t)}${note}</span>`;
 }
 
 function projectChip(projectId) {
@@ -372,9 +435,12 @@ function renderTodo() {
             <select name="projectId">${projectOptions(t.projectId)}</select>
             <span class="plan-inputs">予定
               <input type="date" name="plannedStart" value="${t.plannedStart || ''}">
+              <input type="time" name="plannedStartTime" step="600" value="${t.plannedStartTime || ''}">
               〜
               <input type="date" name="plannedEnd" value="${t.plannedEnd || ''}">
+              <input type="time" name="plannedEndTime" step="600" value="${t.plannedEndTime || ''}">
             </span>
+            <select name="repeat">${repeatOptions(t.repeat || '')}</select>
             <button class="btn btn-primary" type="submit">保存</button>
             <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
           </form>
@@ -397,6 +463,7 @@ function renderTodo() {
           <div class="task-meta">
             ${projectChip(t.projectId)}
             ${planChip(t)}
+            ${repeatChip(t)}
             ${totalMs > 0 ? `<span>累計 ${fmtDur(totalMs)}</span>` : ''}
           </div>
         </div>
@@ -429,9 +496,12 @@ function renderTodo() {
         <select name="projectId">${projectOptions(ui.todoFilterProject || '')}</select>
         <span class="plan-inputs">予定
           <input type="date" name="plannedStart">
+          <input type="time" name="plannedStartTime" step="600">
           〜
           <input type="date" name="plannedEnd">
+          <input type="time" name="plannedEndTime" step="600">
         </span>
+        <select name="repeat">${repeatOptions('')}</select>
         <button class="btn btn-primary" type="submit">追加</button>
       </form>
     </div>
@@ -477,19 +547,25 @@ function assignLanes(items) {
   return lanes.length;
 }
 
-// タイムラインで選択中の日付が予定日程に含まれるタスクの一覧
-function renderPlannedForDay() {
-  const day = ui.timelineDate;
-  const planned = data.tasks
-    .filter((t) => t.plannedStart && t.plannedStart <= day && day <= t.plannedEnd)
-    .sort((a, b) => Number(a.done) - Number(b.done) || b.createdAt - a.createdAt);
+// 指定日が予定日程に含まれるタスクの一覧(ガント1日表示では時刻指定なしのタスクのみに絞れる)
+function renderPlannedForDay(day, opts = {}) {
+  let planned = data.tasks
+    .filter((t) => t.plannedStart && t.plannedStart <= day && day <= t.plannedEnd);
+  if (opts.untimedOnly) planned = planned.filter((t) => !hasTimeOnDay(t, day));
+  planned = planned.sort((a, b) => Number(a.done) - Number(b.done) || b.createdAt - a.createdAt);
   if (!planned.length) return '';
   const items = planned.map((t) => `
     <span class="plan-task ${t.done ? 'done' : ''}">
       <span class="chip-dot" style="background:${projectColor(t.projectId)}"></span>
       ${t.done ? '✔ ' : ''}${esc(t.title)}
     </span>`).join('');
-  return `<div class="plan-day-row"><span class="plan-day-label">📅 この日の予定:</span>${items}</div>`;
+  return `<div class="plan-day-row"><span class="plan-day-label">${opts.label || '📅 この日の予定:'}</span>${items}</div>`;
+}
+
+// 指定した間隔(時間)おきの時刻ラベル(タイムライン・ガント1日表示で共用)
+function hourLabels(stepHours = 2) {
+  const count = 24 / stepHours;
+  return Array.from({ length: count }, (_, i) => `<div class="tl-hour">${i * stepHours}時</div>`).join('');
 }
 
 function renderTimeline() {
@@ -521,17 +597,15 @@ function renderTimeline() {
       title="${esc(tip)}">${esc(label)}</div>`;
   }).join('');
 
-  const hours = Array.from({ length: 12 }, (_, i) => `<div class="tl-hour">${i * 2}時</div>`).join('');
-
   const sortedItems = [...items].sort((a, b) => a.start - b.start);
   const entryRow = (e) => {
     if (ui.editingEntry === e.id) {
       return `
         <li class="entry-item">
           <form class="edit-form" data-action-submit="save-entry" data-id="${e.id}">
-            <input type="time" name="start" value="${toTimeStr(e.clipStart)}" required>
+            <input type="time" name="start" value="${toTimeStr(e.clipStart)}" step="600" required>
             〜
-            <input type="time" name="end" value="${e.end === null ? '' : toTimeStr(e.clipEnd)}" ${e.end === null ? 'disabled' : 'required'}>
+            <input type="time" name="end" value="${e.end === null ? '' : toTimeStr(e.clipEnd)}" step="600" ${e.end === null ? 'disabled' : 'required'}>
             <button class="btn btn-primary" type="submit">保存</button>
             <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
           </form>
@@ -566,10 +640,10 @@ function renderTimeline() {
         <button class="btn" data-action="tl-shift" data-days="1">翌日 ▶</button>
         <button class="btn" data-action="tl-today">今日</button>
       </div>
-      ${renderPlannedForDay()}
+      ${renderPlannedForDay(ui.timelineDate)}
       <div class="timeline-wrap">
         <div class="timeline">
-          <div class="tl-hours">${hours}</div>
+          <div class="tl-hours">${hourLabels()}</div>
           <div class="tl-lanes" style="width:${laneCount * 136}px">${blocks}</div>
         </div>
       </div>
@@ -582,9 +656,9 @@ function renderTimeline() {
       ${activeTasks.length ? `
         <form class="add-form" data-action-submit="add-entry">
           <select name="taskId" required>${taskOpts}</select>
-          <input type="time" name="start" required>
+          <input type="time" name="start" step="600" required>
           〜
-          <input type="time" name="end" required>
+          <input type="time" name="end" step="600" required>
           <button class="btn btn-primary" type="submit">追加</button>
         </form>
         <p class="task-meta" style="margin-top:8px">※ 上で選択中の日付(${fmtDateJa(ui.timelineDate)})に追加されます。終了が開始より前の場合は翌日扱いになります。</p>
@@ -594,7 +668,77 @@ function renderTimeline() {
 
 /* ----- ガントチャートタブ ----- */
 
+function ganttViewToggle() {
+  return `<div class="view-toggle">
+    <button class="btn${ui.ganttView === 'week' ? ' btn-primary' : ''}" data-action="gantt-view" data-view="week">📅 1週間</button>
+    <button class="btn${ui.ganttView === 'day' ? ' btn-primary' : ''}" data-action="gantt-view" data-view="day">🕐 1日</button>
+  </div>`;
+}
+
 function renderGantt() {
+  return ui.ganttView === 'day' ? renderGanttDay() : renderGanttWeek();
+}
+
+// 1日単位: 時刻に沿ってタスクを配置するガントチャート(タイムラインと同じ時間軸UIを再利用)
+function renderGanttDay() {
+  const day = ui.ganttDate;
+  const dayStart = fromDateStr(day).getTime();
+  const dayEnd = dayStart + 86400000;
+  const todayStr = toDateStr(new Date());
+
+  const tasks = data.tasks.filter(
+    (t) => t.plannedStart && t.plannedStart <= day && day <= t.plannedEnd && hasTimeOnDay(t, day)
+  );
+
+  const items = tasks.map((t) => {
+    let start = dayStart;
+    let end = dayEnd;
+    if (t.plannedStart === day && t.plannedStartTime) start = timeToTs(dayStart, t.plannedStartTime);
+    if (t.plannedEnd === day && t.plannedEndTime) end = timeToTs(dayStart, t.plannedEndTime);
+    if (end <= start) end = dayEnd;
+    return { task: t, start, clipStart: start, clipEnd: end };
+  });
+
+  const laneCount = Math.max(1, assignLanes(items));
+
+  const blocks = items.map((it) => {
+    const t = it.task;
+    const project = projectById(t.projectId);
+    const top = ((it.clipStart - dayStart) / 86400000) * 100;
+    const height = ((it.clipEnd - it.clipStart) / 86400000) * 100;
+    const overdue = !t.done && t.plannedEnd < todayStr;
+    const cls = `${t.done ? ' plan-done' : ''}${overdue ? ' plan-overdue' : ''}`;
+    const tip = `${t.title}${project ? ` (${project.name})` : ''}\n${fmtTime(it.clipStart)} 〜 ${fmtTime(it.clipEnd)}` +
+      `${overdue ? '\n⚠ 期限超過' : ''}${t.done ? '\n✔ 完了' : ''}`;
+    const label = project ? `${esc(t.title)} <span class="tl-block-project">・${esc(project.name)}</span>` : esc(t.title);
+    return `<div class="tl-block${cls}"
+      style="top:${top}%;height:${Math.max(height, 0.4)}%;left:${4 + it.lane * 136}px;background:${projectColor(t.projectId)}"
+      title="${esc(tip)}">${label}</div>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <div class="tl-header">
+        <span class="tl-date-label">ガントチャート</span>
+        ${ganttViewToggle()}
+        <span class="tl-total">${fmtDateJa(day)}</span>
+        <button class="btn" data-action="gantt-day-shift" data-days="-1">◀ 前日</button>
+        <input type="date" value="${day}" data-action-change="gantt-date">
+        <button class="btn" data-action="gantt-day-shift" data-days="1">翌日 ▶</button>
+        <button class="btn" data-action="gantt-day-today">今日</button>
+      </div>
+      ${renderPlannedForDay(day, { untimedOnly: true, label: '📅 終日:' })}
+      <div class="timeline-wrap">
+        <div class="timeline">
+          <div class="tl-hours">${hourLabels(1)}</div>
+          <div class="tl-lanes" style="width:${laneCount * 136}px">${blocks}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// 週(複数日)単位: プロジェクトごとにまとめたタスクを日付軸に沿って表示するガントチャート
+function renderGanttWeek() {
   const days = ui.ganttDays;
   const start = fromDateStr(ui.ganttStart);
   const startStr = ui.ganttStart;
@@ -604,7 +748,7 @@ function renderGantt() {
   const todayStr = toDateStr(new Date());
   const dayIdx = (s) => Math.round((fromDateStr(s) - start) / 86400000);
 
-  // 表示期間と重なる予定付きタスクを、プロジェクトごとにまとめる
+  // 表示期間と重なる予定付きタスクを、プロジェクトごとにまとめて1列に並べる
   const inWindow = data.tasks.filter(
     (t) => t.plannedStart && t.plannedStart <= endStr && t.plannedEnd >= startStr
   );
@@ -621,57 +765,54 @@ function renderGantt() {
   const noProj = inWindow.filter((t) => !projectById(t.projectId)).sort(byPlan);
   if (noProj.length) groups.push({ project: null, tasks: noProj });
 
-  // 日付ヘッダーと背景グリッド
+  const cols = [];
+  for (const g of groups) {
+    for (const t of g.tasks) cols.push({ task: t, project: g.project });
+  }
+
+  // 日付ラベル(縦)と背景の行
   const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
-  let headCells = '';
-  let gridCols = '';
+  let dayLabels = '';
+  let bgRows = '';
   for (let i = 0; i < days; i++) {
     const d = new Date(start);
     d.setDate(d.getDate() + i);
     const dow = d.getDay();
     const cls = `${dow === 0 || dow === 6 ? ' weekend' : ''}${toDateStr(d) === todayStr ? ' today' : ''}`;
     const label = (i === 0 || d.getDate() === 1) ? `${d.getMonth() + 1}/${d.getDate()}` : d.getDate();
-    headCells += `<div class="gantt-day${cls}"><div>${label}</div><div class="wd">${WEEK[dow]}</div></div>`;
-    gridCols += `<div class="gantt-grid-col${cls}"></div>`;
+    dayLabels += `<div class="gantt-day-v${cls}" style="grid-row:${i + 2}"><span>${label}</span><span class="wd">${WEEK[dow]}</span></div>`;
+    bgRows += `<div class="gantt-grid-row${cls}" style="grid-row:${i + 2}"></div>`;
   }
 
-  const taskRow = (t) => {
+  // タスク列(縦書きの見出し + 縦棒)
+  let colHeads = '';
+  let bars = '';
+  cols.forEach((c, idx) => {
+    const t = c.task;
+    const col = idx + 2;
     const sIdx = Math.max(dayIdx(t.plannedStart), 0);
     const eIdx = Math.min(dayIdx(t.plannedEnd), days - 1);
-    const left = (sIdx / days) * 100;
-    const width = ((eIdx - sIdx + 1) / days) * 100;
     const overdue = !t.done && t.plannedEnd < todayStr;
     const cls = `${t.done ? ' done' : ''}${overdue ? ' overdue' : ''}` +
-      `${t.plannedStart < startStr ? ' clip-left' : ''}${t.plannedEnd > endStr ? ' clip-right' : ''}`;
+      `${t.plannedStart < startStr ? ' clip-top' : ''}${t.plannedEnd > endStr ? ' clip-bottom' : ''}`;
     const totalDays = dayIdx(t.plannedEnd) - dayIdx(t.plannedStart) + 1;
-    const tip = `${t.title}\n${fmtShortDate(t.plannedStart)} 〜 ${fmtShortDate(t.plannedEnd)} (${totalDays}日間)` +
+    const tip = `${t.title}${c.project ? ` (${c.project.name})` : ''}\n${planLabel(t)} (${totalDays}日間)` +
       `${overdue ? '\n⚠ 期限超過' : ''}${t.done ? '\n✔ 完了' : ''}`;
-    return `
-      <div class="gantt-row">
-        <div class="gantt-label ${t.done ? 'done' : ''}" title="${esc(t.title)}">
-          ${t.done ? '✔ ' : ''}${overdue ? '<span class="overdue-mark">⚠</span> ' : ''}${esc(t.title)}
-        </div>
-        <div class="gantt-track">
-          <div class="gantt-bar${cls}" style="left:${left}%;width:${width}%;background:${projectColor(t.projectId)}"
-            title="${esc(tip)}"></div>
-        </div>
+    colHeads += `
+      <div class="gantt-col-label${t.done ? ' done' : ''}" style="grid-column:${col}" title="${esc(tip)}">
+        <span class="chip-dot" style="background:${projectColor(t.projectId)}"></span>
+        ${overdue ? '<span class="overdue-mark">⚠</span> ' : ''}${esc(t.title)}
+        ${c.project ? `<span class="gantt-col-project">・${esc(c.project.name)}</span>` : ''}
       </div>`;
-  };
-
-  const rows = groups.map((g) => `
-    <div class="gantt-row project">
-      <div class="gantt-label">
-        <span class="chip-dot" style="background:${g.project ? g.project.color : '#898781'}"></span>
-        ${esc(g.project ? projectLabel(g.project.id) : 'プロジェクトなし')}
-      </div>
-      <div class="gantt-track"></div>
-    </div>
-    ${g.tasks.map(taskRow).join('')}`).join('');
+    bars += `<div class="gantt-bar-v${cls}" style="grid-column:${col};grid-row:${sIdx + 2} / ${eIdx + 3};background:${projectColor(t.projectId)}"
+        title="${esc(tip)}"></div>`;
+  });
 
   return `
     <div class="card">
       <div class="tl-header">
         <span class="tl-date-label">ガントチャート</span>
+        ${ganttViewToggle()}
         <span class="tl-total">${fmtDateJa(startStr)} 〜 ${fmtDateJa(endStr)}</span>
         <select data-action-change="gantt-days">
           <option value="14"${days === 14 ? ' selected' : ''}>2週間</option>
@@ -682,17 +823,13 @@ function renderGantt() {
         <button class="btn" data-action="gantt-today">今日</button>
         <button class="btn" data-action="gantt-shift" data-days="7">翌週 ▶</button>
       </div>
-      ${groups.length ? `
+      ${cols.length ? `
         <div class="gantt-wrap">
-          <div class="gantt${days > 28 ? ' gantt-dense' : ''}" style="min-width:${220 + days * 26}px">
-            <div class="gantt-head">
-              <div class="gantt-label-cell"></div>
-              <div class="gantt-days">${headCells}</div>
-            </div>
-            <div class="gantt-body">
-              <div class="gantt-grid">${gridCols}</div>
-              ${rows}
-            </div>
+          <div class="gantt-v" style="grid-template-columns:56px repeat(${cols.length}, 34px);grid-template-rows:150px repeat(${days}, 22px)">
+            ${bgRows}
+            ${dayLabels}
+            ${colHeads}
+            ${bars}
           </div>
         </div>` : '<p class="empty">この期間に予定日程が設定されたタスクはありません。Todoタブでタスクに予定を設定してください。</p>'}
     </div>`;
@@ -955,6 +1092,18 @@ document.addEventListener('click', (ev) => {
     case 'gantt-today':
       ui.ganttStart = toDateStr(startOfWeek(new Date()));
       break;
+    case 'gantt-view':
+      ui.ganttView = el.dataset.view;
+      break;
+    case 'gantt-day-shift': {
+      const d = fromDateStr(ui.ganttDate);
+      d.setDate(d.getDate() + Number(el.dataset.days));
+      ui.ganttDate = toDateStr(d);
+      break;
+    }
+    case 'gantt-day-today':
+      ui.ganttDate = toDateStr(new Date());
+      break;
     case 'quick-range': {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -1004,6 +1153,10 @@ document.addEventListener('change', (ev) => {
       // 計測中のタスクを完了したらそのタスクの計測を停止
       const r = runningEntryForTask(t.id);
       if (el.checked && r) stopTimer(r.id);
+      // 繰り返しタスクを完了したら次回分を自動生成
+      if (el.checked && t.repeat) {
+        data.tasks.push(nextOccurrence(t));
+      }
       save();
       break;
     }
@@ -1015,6 +1168,9 @@ document.addEventListener('change', (ev) => {
       break;
     case 'gantt-days':
       ui.ganttDays = Number(el.value);
+      break;
+    case 'gantt-date':
+      if (el.value) ui.ganttDate = el.value;
       break;
     case 'agg-from':
       if (el.value) {
@@ -1052,7 +1208,8 @@ document.addEventListener('submit', (ev) => {
         done: false,
         createdAt: Date.now(),
         completedAt: null,
-        ...planRange(fd.get('plannedStart'), fd.get('plannedEnd')),
+        repeat: fd.get('repeat') || null,
+        ...planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')),
       });
       break;
     }
@@ -1062,7 +1219,8 @@ document.addEventListener('submit', (ev) => {
       const title = String(fd.get('title')).trim();
       if (title) t.title = title;
       t.projectId = fd.get('projectId') || null;
-      Object.assign(t, planRange(fd.get('plannedStart'), fd.get('plannedEnd')));
+      t.repeat = fd.get('repeat') || null;
+      Object.assign(t, planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')));
       clearEditing();
       break;
     }
