@@ -34,6 +34,7 @@ const ui = {
   editingEntry: null,
   editingClient: null,
   editingProject: null,
+  googleStatus: { configured: false, connected: false },
 };
 
 function normalize(d) {
@@ -49,6 +50,65 @@ async function loadFromServer() {
   const res = await fetch('/api/data');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return normalize(await res.json());
+}
+
+async function fetchGoogleStatus() {
+  const res = await fetch('/api/google/status');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Googleカレンダーに登録するタイトルを組み立てる
+// プロジェクトIDがあれば「[ID]プロジェクト名:タスク名」、なければ「プロジェクト名:タスク名」、
+// プロジェクト未設定なら「タスク名」のみ
+function googleEventTitle(task, project) {
+  const taskTitle = task ? task.title : '(不明なタスク)';
+  if (!project) return taskTitle;
+  const prefix = project.customId ? `[${project.customId}]${project.name}` : project.name;
+  return `${prefix}：${taskTitle}`;
+}
+
+// 完了した作業記録をGoogleカレンダーに反映する(未連携なら何もしない、失敗しても計測機能はブロックしない)
+function syncEntryToGoogle(entry) {
+  if (!entry || entry.end === null || !ui.googleStatus.connected) return;
+  const task = taskById(entry.taskId);
+  const project = task ? projectById(task.projectId) : null;
+  fetch('/api/calendar/sync-entry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      entryId: entry.id,
+      title: googleEventTitle(task, project),
+      project: project ? project.name : null,
+      start: entry.start,
+      end: entry.end,
+    }),
+  }).catch((e) => console.warn('Googleカレンダーへの同期に失敗しました', e));
+}
+
+async function connectGoogle() {
+  try {
+    const res = await fetch('/api/google/auth-url');
+    const body = await res.json();
+    if (!res.ok) {
+      alert(body.error || 'Google連携用のURLを取得できませんでした');
+      return;
+    }
+    location.href = body.url;
+  } catch (e) {
+    console.error('Google連携の開始に失敗しました', e);
+    alert('Google連携を開始できませんでした');
+  }
+}
+
+async function disconnectGoogle() {
+  try {
+    await fetch('/api/google/disconnect', { method: 'POST' });
+    ui.googleStatus = await fetchGoogleStatus();
+    renderAll();
+  } catch (e) {
+    console.error('Google連携の解除に失敗しました', e);
+  }
 }
 
 let saveWarned = false;
@@ -291,13 +351,16 @@ function stopTimer(entryId) {
   if (e && e.end === null) {
     e.end = Date.now();
     save();
+    syncEntryToGoogle(e);
   }
 }
 
 function stopAllTimers() {
   const now = Date.now();
-  runningEntries().forEach((e) => { e.end = now; });
+  const stopped = runningEntries();
+  stopped.forEach((e) => { e.end = now; });
   save();
+  stopped.forEach(syncEntryToGoogle);
 }
 
 function deleteTask(id) {
@@ -988,6 +1051,28 @@ function renderManage() {
       </li>`;
   };
 
+  const googleCard = () => {
+    const s = ui.googleStatus;
+    let status;
+    let action;
+    if (!s.configured) {
+      status = '<span class="sub">data/google-credentials.json が未設定です</span>';
+      action = '';
+    } else if (!s.connected) {
+      status = '<span class="sub">未連携</span>';
+      action = '<button class="btn btn-primary" data-action="google-connect">連携する</button>';
+    } else {
+      status = '<span class="sub">連携済み</span>';
+      action = '<button class="btn" data-action="google-disconnect">連携を解除</button>';
+    }
+    return `
+      <div class="card">
+        <h2>🗓️ Googleカレンダー連携</h2>
+        <p>${status}</p>
+        ${action}
+      </div>`;
+  };
+
   return `
     <div class="manage-grid">
       <div class="card">
@@ -1012,6 +1097,7 @@ function renderManage() {
           ${data.projects.length ? data.projects.map(projectRow).join('') : '<li class="empty">プロジェクトがありません</li>'}
         </ul>
       </div>
+      ${googleCard()}
     </div>`;
 }
 
@@ -1077,6 +1163,12 @@ document.addEventListener('click', (ev) => {
     case 'cancel-edit':
       clearEditing();
       break;
+    case 'google-connect':
+      connectGoogle();
+      return;
+    case 'google-disconnect':
+      disconnectGoogle();
+      return;
     case 'tl-shift': {
       const d = fromDateStr(ui.timelineDate);
       d.setDate(d.getDate() + Number(el.dataset.days));
@@ -1199,6 +1291,7 @@ document.addEventListener('submit', (ev) => {
   ev.preventDefault();
   const fd = new FormData(form);
   const id = form.dataset.id;
+  let syncEntry = null;
 
   switch (form.dataset.actionSubmit) {
     case 'add-task': {
@@ -1233,7 +1326,9 @@ document.addEventListener('submit', (ev) => {
       const start = timeToTs(dayStart, String(fd.get('start')));
       let end = timeToTs(dayStart, String(fd.get('end')));
       if (end <= start) end += 86400000; // 日をまたぐ場合
-      data.entries.push({ id: uid(), taskId, start, end });
+      const newEntry = { id: uid(), taskId, start, end };
+      data.entries.push(newEntry);
+      syncEntry = newEntry;
       break;
     }
     case 'save-entry': {
@@ -1245,6 +1340,7 @@ document.addEventListener('submit', (ev) => {
         let end = timeToTs(dayStart, String(fd.get('end')));
         if (end <= e.start) end += 86400000;
         e.end = end;
+        syncEntry = e;
       }
       clearEditing();
       break;
@@ -1291,6 +1387,7 @@ document.addEventListener('submit', (ev) => {
   }
   save();
   renderAll();
+  if (syncEntry) syncEntryToGoogle(syncEntry);
 });
 
 // "HH:MM" → タイムスタンプ(dayStart基準)
@@ -1337,6 +1434,16 @@ async function init() {
     return;
   }
   migrateFromLocalStorage();
+  try {
+    ui.googleStatus = await fetchGoogleStatus();
+  } catch (e) {
+    console.error('Google連携状態の取得に失敗しました', e);
+  }
+  const params = new URLSearchParams(location.search);
+  if (params.has('google')) {
+    ui.tab = 'manage';
+    history.replaceState(null, '', location.pathname);
+  }
   renderAll();
 }
 
