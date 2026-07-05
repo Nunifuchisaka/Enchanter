@@ -1,0 +1,9 @@
+{
+  "name": "enchanter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "タスク管理・時間計測ツール",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

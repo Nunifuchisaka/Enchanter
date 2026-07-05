@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enchanter - タスク管理</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">✦</span>
+      <h1>Enchanter</h1>
+    </div>
+    <div id="running-box" class="running-box"></div>
+    <nav class="tabs">
+      <button class="tab-btn" data-action="tab" data-tab="todo">Todo</button>
+      <button class="tab-btn" data-action="tab" data-tab="timeline">タイムライン</button>
+      <button class="tab-btn" data-action="tab" data-tab="gantt">ガント</button>
+      <button class="tab-btn" data-action="tab" data-tab="report">集計</button>
+      <button class="tab-btn" data-action="tab" data-tab="manage">管理</button>
+    </nav>
+  </header>
+  <main id="view" class="view"></main>
+  <script src="app.js"></script>
+</body>
+</html>

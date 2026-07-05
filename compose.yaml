@@ -1,0 +1,9 @@
+services:
+  enchanter:
+    build: .
+    container_name: enchanter
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

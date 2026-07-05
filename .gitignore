@@ -1,0 +1,10 @@
+# 個人の入力データ(タスク・作業記録など)はgit管理しない
+data/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
