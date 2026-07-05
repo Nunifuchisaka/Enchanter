@@ -513,11 +513,25 @@ function renderTodo() {
       .filter((e) => e.taskId === t.id)
       .reduce((sum, e) => sum + entryDur(e, now), 0);
     const running = runningEntryForTask(t.id);
-    const timerBtn = t.done
-      ? ''
-      : running
-        ? `<button class="timer-btn stop" data-action="stop-timer" data-id="${running.id}">■ <span data-live-since="${running.start}">${fmtClock(now - running.start)}</span></button>`
-        : `<button class="timer-btn start" data-action="start-timer" data-id="${t.id}">▶ 計測</button>`;
+    let timerBtn;
+    if (t.done) {
+      timerBtn = '';
+    } else if (running && ui.editingEntry === running.id) {
+      timerBtn = `
+        <form class="edit-form" data-action-submit="save-running-start" data-id="${running.id}">
+          開始
+          <input type="date" name="startDate" value="${toDateStr(new Date(running.start))}" required>
+          <input type="time" name="startTime" step="60" value="${toTimeStr(running.start)}" required>
+          <button class="btn btn-primary" type="submit">保存</button>
+          <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
+        </form>`;
+    } else if (running) {
+      timerBtn = `
+        <button class="timer-btn stop" data-action="stop-timer" data-id="${running.id}">■ <span data-live-since="${running.start}">${fmtClock(now - running.start)}</span></button>
+        <button class="btn-icon" data-action="edit-entry" data-id="${running.id}" title="開始時刻を編集">✎</button>`;
+    } else {
+      timerBtn = `<button class="timer-btn start" data-action="start-timer" data-id="${t.id}">▶ 計測</button>`;
+    }
     return `
       <li class="task-item ${t.done ? 'done' : ''}">
         <input type="checkbox" ${t.done ? 'checked' : ''} data-action-change="toggle-done" data-id="${t.id}">
@@ -1342,6 +1356,19 @@ document.addEventListener('submit', (ev) => {
         e.end = end;
         syncEntry = e;
       }
+      clearEditing();
+      break;
+    }
+    case 'save-running-start': {
+      const e = entryById(id);
+      if (!e || e.end !== null) return;
+      const dayStart = fromDateStr(String(fd.get('startDate'))).getTime();
+      const newStart = timeToTs(dayStart, String(fd.get('startTime')));
+      if (newStart > Date.now()) {
+        alert('開始時刻は現在時刻より前にしてください');
+        return;
+      }
+      e.start = newStart;
       clearEditing();
       break;
     }
