@@ -12,11 +12,33 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT) || 8787;
+const HOST = process.env.HOST || '127.0.0.1';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'enchanter-data.json');
 const MAX_BODY = 20 * 1024 * 1024;
 
 const EMPTY_DATA = { clients: [], projects: [], tasks: [], entries: [] };
+const DEFAULT_COLOR = '#7c5cff';
+const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const REPEAT_VALUES = new Set(['daily', 'weekly', 'monthly']);
+
+// color/repeatは通常UI(color入力・select)で値が制限されるが、APIを直接叩いたり
+// データファイルを手編集された場合にHTML属性コンテキストへ不正な文字列(XSS)が
+// 混入しないよう、保存前にサーバー側でも値の形式を強制する
+function sanitizeData(d) {
+  return {
+    clients: d.clients || [],
+    projects: (d.projects || []).map((p) => ({
+      ...p,
+      color: COLOR_RE.test(p.color) ? p.color : DEFAULT_COLOR,
+    })),
+    tasks: (d.tasks || []).map((t) => ({
+      ...t,
+      repeat: REPEAT_VALUES.has(t.repeat) ? t.repeat : null,
+    })),
+    entries: d.entries || [],
+  };
+}
 
 // ---- Google カレンダー連携 ----
 const GOOGLE_CREDENTIALS_FILE = path.join(DATA_DIR, 'google-credentials.json');
@@ -38,12 +60,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 function readData() {
   try {
     const d = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    return {
-      clients: d.clients || [],
-      projects: d.projects || [],
-      tasks: d.tasks || [],
-      entries: d.entries || [],
-    };
+    return sanitizeData(d);
   } catch (e) {
     return EMPTY_DATA;
   }
@@ -61,6 +78,20 @@ function sendJson(res, status, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(body);
+}
+
+// カスタムヘッダーの付与を必須にすることで、あらゆるメソッドでCORSプリフライトを
+// 発生させる。このサーバーはプリフライト(OPTIONS)に応答しないため、外部サイトから
+// ブラウザ経由で状態変更系エンドポイントを叩く(CSRF)ことができなくなる。
+const CSRF_HEADER = 'x-requested-with';
+const CSRF_VALUE = 'enchanter';
+
+function requireCsrfHeader(req, res) {
+  if (req.headers[CSRF_HEADER] !== CSRF_VALUE) {
+    sendJson(res, 400, { error: '不正なリクエストです' });
+    return false;
+  }
+  return true;
 }
 
 function readJsonSafe(file, fallback) {
@@ -231,6 +262,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (req.method === 'PUT') {
+      if (!requireCsrfHeader(req, res)) return;
       let body = '';
       let aborted = false;
       req.on('data', (chunk) => {
@@ -248,12 +280,7 @@ const server = http.createServer((req, res) => {
           if (typeof d !== 'object' || d === null || Array.isArray(d)) {
             throw new Error('invalid shape');
           }
-          writeData({
-            clients: d.clients || [],
-            projects: d.projects || [],
-            tasks: d.tasks || [],
-            entries: d.entries || [],
-          });
+          writeData(sanitizeData(d));
           res.writeHead(204);
           res.end();
         } catch (e) {
@@ -304,6 +331,7 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/google/disconnect') {
     if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }); res.end(); return; }
+    if (!requireCsrfHeader(req, res)) return;
     try { fs.unlinkSync(GOOGLE_TOKEN_FILE); } catch (e) { /* 既に未連携なら無視 */ }
     res.writeHead(204);
     res.end();
@@ -312,6 +340,7 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/calendar/sync-entry') {
     if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }); res.end(); return; }
+    if (!requireCsrfHeader(req, res)) return;
     let body = '';
     let aborted = false;
     req.on('data', (chunk) => {
@@ -356,7 +385,7 @@ const server = http.createServer((req, res) => {
   res.end('Not Found');
 });
 
-server.listen(PORT, () => {
-  console.log(`Enchanter が起動しました: http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Enchanter が起動しました: http://localhost:${PORT} (bind: ${HOST})`);
   console.log(`データ保存先: ${DATA_FILE}`);
 });

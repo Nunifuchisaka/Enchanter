@@ -75,7 +75,7 @@ function syncEntryToGoogle(entry) {
   const project = task ? projectById(task.projectId) : null;
   fetch('/api/calendar/sync-entry', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
     body: JSON.stringify({
       entryId: entry.id,
       title: googleEventTitle(task, project),
@@ -103,7 +103,7 @@ async function connectGoogle() {
 
 async function disconnectGoogle() {
   try {
-    await fetch('/api/google/disconnect', { method: 'POST' });
+    await fetch('/api/google/disconnect', { method: 'POST', headers: { 'X-Requested-With': 'enchanter' } });
     ui.googleStatus = await fetchGoogleStatus();
     renderAll();
   } catch (e) {
@@ -120,7 +120,7 @@ function save() {
   saveChain = saveChain
     .then(() => fetch('/api/data', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
       body,
     }))
     .then((res) => {
@@ -187,7 +187,7 @@ function runningEntryForTask(taskId) {
 
 function projectColor(projectId) {
   const p = projectById(projectId);
-  return p ? p.color : '#9a95b3';
+  return esc(p ? p.color : '#9a95b3');
 }
 
 function projectLabel(projectId) {
@@ -305,7 +305,7 @@ function repeatOptions(selected) {
 
 function repeatChip(t) {
   if (!t.repeat) return '';
-  return `<span class="chip">🔁 ${REPEAT_LABELS[t.repeat] || t.repeat}</span>`;
+  return `<span class="chip">🔁 ${REPEAT_LABELS[t.repeat] || esc(t.repeat)}</span>`;
 }
 
 // 予定日を繰り返し単位ぶんだけ先送りする
@@ -467,7 +467,7 @@ function renderRunningBox() {
     const task = taskById(r.taskId);
     const project = task ? projectById(task.projectId) : null;
     const projectHtml = project
-      ? `<span class="running-project"><span class="chip-dot" style="background:${project.color}"></span>${esc(project.name)}</span>`
+      ? `<span class="running-project"><span class="chip-dot" style="background:${esc(project.color)}"></span>${esc(project.name)}</span>`
       : '';
     return `
       <span class="running-inner">
@@ -963,7 +963,7 @@ function renderReport() {
     const sortedProjects = [...cNode.projects.entries()].sort((a, b) => b[1].total - a[1].total);
     for (const [projectId, pNode] of sortedProjects) {
       const project = projectById(projectId);
-      const dot = project ? `<span class="chip-dot" style="background:${project.color};display:inline-block;margin-right:6px"></span>` : '';
+      const dot = project ? `<span class="chip-dot" style="background:${esc(project.color)};display:inline-block;margin-right:6px"></span>` : '';
       rows.push(`<tr class="row-project">
         <td>${dot}${esc(project ? project.name : 'プロジェクトなし')}</td>
         <td class="num">${fmtDur(pNode.total)}</td>
@@ -1046,7 +1046,7 @@ function renderManage() {
             <input type="text" name="name" value="${esc(p.name)}" required>
             <input type="text" name="customId" value="${esc(p.customId || '')}" placeholder="ID(任意)">
             <select name="clientId">${clientOpts(p.clientId)}</select>
-            <input type="color" name="color" value="${p.color}" title="カラー">
+            <input type="color" name="color" value="${esc(p.color)}" title="カラー">
             <button class="btn btn-primary" type="submit">保存</button>
             <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
           </form>
@@ -1056,7 +1056,7 @@ function renderManage() {
     const count = data.tasks.filter((t) => t.projectId === p.id).length;
     return `
       <li class="manage-item">
-        <span class="chip-dot" style="background:${p.color}"></span>
+        <span class="chip-dot" style="background:${esc(p.color)}"></span>
         <span class="name">${esc(p.name)}</span>
         ${p.customId ? `<span class="chip">${esc(p.customId)}</span>` : ''}
         <span class="sub">${client ? esc(client.name) : 'クライアントなし'} ・ ${count} タスク</span>
