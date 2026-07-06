@@ -721,7 +721,7 @@ details.done-section summary {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1;
   color: var(--text-sub);
   background: var(--surface);
@@ -731,7 +731,7 @@ details.done-section summary {
 }
 
 .gantt-day-v .wd {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .gantt-day-v.today {
@@ -743,7 +743,7 @@ details.done-section summary {
   grid-row: 1;
   writing-mode: vertical-rl;
   padding: 6px 3px;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
@@ -766,7 +766,7 @@ details.done-section summary {
 
 .gantt-col-project {
   color: var(--text-sub);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .overdue-mark {
@@ -780,11 +780,20 @@ details.done-section summary {
   min-height: 4px;
   border-radius: 4px;
   box-shadow: var(--shadow);
+  cursor: grab;
   z-index: 2;
+  touch-action: none;
+  user-select: none;
 }
 
 .gantt-bar-v:hover {
   filter: brightness(1.15);
+}
+
+.gantt-bar-v.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  z-index: 3;
 }
 
 .gantt-bar-v.done {

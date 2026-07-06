@@ -37,6 +37,9 @@ const ui = {
   googleStatus: { configured: false, connected: false },
 };
 
+let ganttDrag = null;
+let lastGanttDragUndo = null;
+
 function normalize(d) {
   return {
     clients: d.clients || [],
@@ -209,6 +212,12 @@ function toDateStr(d) {
 function fromDateStr(s) {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d);
+}
+
+function addDays(dateStr, days) {
+  const d = fromDateStr(dateStr);
+  d.setDate(d.getDate() + days);
+  return toDateStr(d);
 }
 
 function startOfWeek(d) {
@@ -523,7 +532,7 @@ function applyHash() {
     if (view === 'day' || view === 'week') ui.ganttView = view;
     if (HASH_DATE_RE.test(date || '')) ui.ganttDate = date;
     if (HASH_DATE_RE.test(params.get('start') || '')) ui.ganttStart = params.get('start');
-    if ([14, 28, 56].includes(Number(params.get('days')))) ui.ganttDays = Number(params.get('days'));
+    if ([7, 14, 28, 56].includes(Number(params.get('days')))) ui.ganttDays = Number(params.get('days'));
   } else if (tab === 'report') {
     if (HASH_DATE_RE.test(params.get('from') || '')) ui.aggFrom = params.get('from');
     if (HASH_DATE_RE.test(params.get('to') || '')) ui.aggTo = params.get('to');
@@ -926,6 +935,7 @@ function renderGanttDay() {
 // 週(複数日)単位: プロジェクトごとにまとめたタスクを日付軸に沿って表示するガントチャート
 function renderGanttWeek() {
   const days = ui.ganttDays;
+  const rowHeight = 28;
   const start = fromDateStr(ui.ganttStart);
   const startStr = ui.ganttStart;
   const endDate = new Date(start);
@@ -991,6 +1001,7 @@ function renderGanttWeek() {
         ${c.project ? `<span class="gantt-col-project">・${esc(c.project.name)}</span>` : ''}
       </div>`;
     bars += `<div class="gantt-bar-v${cls}" style="grid-column:${col};grid-row:${sIdx + 2} / ${eIdx + 3};background:${projectColor(t.projectId)}"
+        data-action-pointer="gantt-drag" data-id="${t.id}" data-row-height="${rowHeight}"
         title="${esc(tip)}"></div>`;
   });
 
@@ -1000,6 +1011,7 @@ function renderGanttWeek() {
         <span class="tl-date-label">📅 1週間</span>
         <span class="tl-total">${fmtDateJa(startStr)} 〜 ${fmtDateJa(endStr)}</span>
         <select data-action-change="gantt-days">
+          <option value="7"${days === 7 ? ' selected' : ''}>1週間</option>
           <option value="14"${days === 14 ? ' selected' : ''}>2週間</option>
           <option value="28"${days === 28 ? ' selected' : ''}>4週間</option>
           <option value="56"${days === 56 ? ' selected' : ''}>8週間</option>
@@ -1010,7 +1022,7 @@ function renderGanttWeek() {
       </div>
       ${cols.length ? `
         <div class="gantt-wrap">
-          <div class="gantt-v" style="grid-template-columns:56px repeat(${cols.length}, 34px);grid-template-rows:150px repeat(${days}, 22px)">
+          <div class="gantt-v" style="grid-template-columns:64px repeat(${cols.length}, 38px);grid-template-rows:180px repeat(${days}, ${rowHeight}px)">
             ${bgRows}
             ${dayLabels}
             ${colHeads}
@@ -1670,6 +1682,54 @@ document.addEventListener('submit', (ev) => {
   if (syncEntry) syncEntryToGoogle(syncEntry);
 });
 
+document.addEventListener('pointerdown', (ev) => {
+  const el = ev.target.closest('[data-action-pointer="gantt-drag"]');
+  if (!el || ev.button !== 0) return;
+  const t = taskById(el.dataset.id);
+  if (!t || !t.plannedStart || !t.plannedEnd) return;
+  ev.preventDefault();
+  ganttDrag = {
+    el,
+    pointerId: ev.pointerId,
+    startY: ev.clientY,
+    rowHeight: Number(el.dataset.rowHeight) || 28,
+    taskId: t.id,
+  };
+  el.classList.add('dragging');
+  el.setPointerCapture(ev.pointerId);
+});
+
+document.addEventListener('pointermove', (ev) => {
+  if (!ganttDrag || ev.pointerId !== ganttDrag.pointerId) return;
+  const deltaDays = Math.round((ev.clientY - ganttDrag.startY) / ganttDrag.rowHeight);
+  ganttDrag.el.style.transform = `translateY(${deltaDays * ganttDrag.rowHeight}px)`;
+});
+
+function finishGanttDrag(ev, commit) {
+  if (!ganttDrag || ev.pointerId !== ganttDrag.pointerId) return;
+  const drag = ganttDrag;
+  ganttDrag = null;
+  drag.el.classList.remove('dragging');
+  drag.el.style.transform = '';
+  if (drag.el.hasPointerCapture(drag.pointerId)) drag.el.releasePointerCapture(drag.pointerId);
+  if (!commit) return;
+  const deltaDays = Math.round((ev.clientY - drag.startY) / drag.rowHeight);
+  const t = taskById(drag.taskId);
+  if (!t || !deltaDays) return;
+  lastGanttDragUndo = {
+    taskId: t.id,
+    plannedStart: t.plannedStart,
+    plannedEnd: t.plannedEnd,
+  };
+  t.plannedStart = addDays(t.plannedStart, deltaDays);
+  t.plannedEnd = addDays(t.plannedEnd, deltaDays);
+  save();
+  renderAll();
+}
+
+document.addEventListener('pointerup', (ev) => finishGanttDrag(ev, true));
+document.addEventListener('pointercancel', (ev) => finishGanttDrag(ev, false));
+
 // 戻る/進むやハッシュの手入力に追従する(renderAll内のreplaceStateでは発火しない)
 window.addEventListener('hashchange', () => {
   applyHash();
@@ -1678,8 +1738,29 @@ window.addEventListener('hashchange', () => {
 
 const SHORTCUT_TABS = { 1: 'todo', 2: 'timeline', 3: 'gantt', 4: 'report', 5: 'manage' };
 
+function undoLastGanttDrag() {
+  if (!lastGanttDragUndo) return false;
+  const t = taskById(lastGanttDragUndo.taskId);
+  if (!t) {
+    lastGanttDragUndo = null;
+    return false;
+  }
+  t.plannedStart = lastGanttDragUndo.plannedStart;
+  t.plannedEnd = lastGanttDragUndo.plannedEnd;
+  lastGanttDragUndo = null;
+  save();
+  renderAll();
+  return true;
+}
+
 document.addEventListener('keydown', (ev) => {
   if (ev.isComposing) return; // 日本語入力の変換中は無視
+  const t = ev.target;
+  const isTextInput = t.matches && t.matches('input, textarea, select') || t.isContentEditable;
+  if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && ev.key.toLowerCase() === 'z' && !isTextInput) {
+    if (undoLastGanttDrag()) ev.preventDefault();
+    return;
+  }
   if (ev.key === 'Escape') {
     if (ui.editingTask || ui.editingEntry || ui.editingClient || ui.editingProject) {
       clearEditing();
@@ -1688,8 +1769,7 @@ document.addEventListener('keydown', (ev) => {
     return;
   }
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-  const t = ev.target;
-  if (t.matches && t.matches('input, textarea, select') || t.isContentEditable) return;
+  if (isTextInput) return;
   if (SHORTCUT_TABS[ev.key]) {
     ui.tab = SHORTCUT_TABS[ev.key];
     clearEditing();
