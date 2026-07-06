@@ -6,7 +6,7 @@
 
 ### 方法1: Node.jsで起動(推奨・依存パッケージなし)
 
-`start.cmd` をダブルクリックするだけです。サーバーが起動し、ブラウザで http://localhost:8787 が開きます。
+Windowsは `start.cmd`、Mac/Linuxは `start.sh` をダブルクリック(または実行)するだけです。サーバーが起動し、ブラウザで http://localhost:8787 が開きます。
 
 コマンドで起動する場合:
 
@@ -62,6 +62,7 @@ http://localhost:8787 を開いてください。データは `./data` フォル
 | `style.css` | スタイル(ライト/ダークテーマ自動対応) |
 | `app.js` | アプリ本体(バニラJS、依存なし) |
 | `start.cmd` | Windows用起動スクリプト |
+| `start.sh` | Mac/Linux用起動スクリプト |
 | `Dockerfile` / `compose.yaml` | Docker起動用 |
 
 ## API
@@ -112,7 +113,7 @@ http://localhost:8787 を開いてください。データは `./data` フォル
 
 ### 連携方法
 
-1. サーバーを再起動(`node server.js` または `start.cmd`)
+1. サーバーを再起動(`node server.js` または `start.cmd`/`start.sh`)
 2. アプリの「管理」タブを開くと「🗓️ Googleカレンダー連携」カードが表示されます
 3. 「連携する」ボタンを押し、Googleの同意画面で許可すると、アプリに戻って「連携済み」と表示されます
 
