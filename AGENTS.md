@@ -14,6 +14,10 @@ Enchanter is a self-hosted, single-user task/time-tracking tool (Todo管理 + �
 - Default port `8787`; override with `PORT` env var. Data directory defaults to `./data`; override with `DATA_DIR` env var. Bind address defaults to `127.0.0.1` (loopback-only, since there's no auth); override with `HOST` env var to expose on the LAN.
 - The app **must** be accessed via the server (`http://localhost:8787`); opening `index.html` directly (`file://`) does not work since saving requires the HTTP API, and `app.js` explicitly detects and blocks this case.
 
+## Git
+
+- Commit messages should be written in Japanese.
+
 ## Architecture
 
 Four files make up the whole app, each with exactly one job:
