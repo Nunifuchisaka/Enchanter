@@ -242,6 +242,17 @@ function toTimeStr(ts) {
   return fmtTime(ts);
 }
 
+function minutesToTime(mins) {
+  const m = Math.max(0, Math.min(1439, mins));
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+function roundToStep(value, step) {
+  return Math.round(value / step) * step;
+}
+
 // 5分刻みの時刻<select>を生成
 function timeOptions(selected) {
   let html = '';
@@ -900,15 +911,19 @@ function renderGanttDay() {
   const blocks = items.map((it) => {
     const t = it.task;
     const project = projectById(t.projectId);
+    const startMin = Math.round((it.clipStart - dayStart) / 60000);
+    const endMin = Math.round((it.clipEnd - dayStart) / 60000);
+    const draggable = t.plannedStart === day && t.plannedEnd === day;
     const top = ((it.clipStart - dayStart) / 86400000) * 100;
     const height = ((it.clipEnd - it.clipStart) / 86400000) * 100;
     const overdue = !t.done && t.plannedEnd < todayStr;
-    const cls = `${t.done ? ' plan-done' : ''}${overdue ? ' plan-overdue' : ''}`;
+    const cls = `${t.done ? ' plan-done' : ''}${overdue ? ' plan-overdue' : ''}${draggable ? ' gantt-day-draggable' : ''}`;
     const tip = `${t.title}${project ? ` (${project.name})` : ''}\n${fmtTime(it.clipStart)} 〜 ${fmtTime(it.clipEnd)}` +
       `${overdue ? '\n⚠ 期限超過' : ''}${t.done ? '\n✔ 完了' : ''}`;
     const label = project ? `${esc(t.title)} <span class="tl-block-project">・${esc(project.name)}</span>` : esc(t.title);
     return `<div class="tl-block${cls}"
       style="top:${top}%;height:${Math.max(height, 0.4)}%;left:${4 + it.lane * 136}px;background:${projectColor(t.projectId)}"
+      ${draggable ? `data-action-pointer="gantt-day-drag" data-id="${t.id}" data-day="${day}" data-start-min="${startMin}" data-end-min="${endMin}"` : ''}
       title="${esc(tip)}">${label}</div>`;
   }).join('');
 
@@ -1683,17 +1698,25 @@ document.addEventListener('submit', (ev) => {
 });
 
 document.addEventListener('pointerdown', (ev) => {
-  const el = ev.target.closest('[data-action-pointer="gantt-drag"]');
+  const el = ev.target.closest('[data-action-pointer]');
   if (!el || ev.button !== 0) return;
   const t = taskById(el.dataset.id);
   if (!t || !t.plannedStart || !t.plannedEnd) return;
   ev.preventDefault();
+  const action = el.dataset.actionPointer;
+  const timeline = el.closest('.timeline');
+  const timelineHeight = timeline ? timeline.getBoundingClientRect().height : 960;
   ganttDrag = {
     el,
+    action,
     pointerId: ev.pointerId,
     startY: ev.clientY,
     rowHeight: Number(el.dataset.rowHeight) || 28,
     taskId: t.id,
+    day: el.dataset.day || null,
+    startMin: Number(el.dataset.startMin),
+    endMin: Number(el.dataset.endMin),
+    minuteHeight: timelineHeight / 1440,
   };
   el.classList.add('dragging');
   el.setPointerCapture(ev.pointerId);
@@ -1701,8 +1724,13 @@ document.addEventListener('pointerdown', (ev) => {
 
 document.addEventListener('pointermove', (ev) => {
   if (!ganttDrag || ev.pointerId !== ganttDrag.pointerId) return;
-  const deltaDays = Math.round((ev.clientY - ganttDrag.startY) / ganttDrag.rowHeight);
-  ganttDrag.el.style.transform = `translateY(${deltaDays * ganttDrag.rowHeight}px)`;
+  if (ganttDrag.action === 'gantt-day-drag') {
+    const deltaMin = roundToStep((ev.clientY - ganttDrag.startY) / ganttDrag.minuteHeight, 5);
+    ganttDrag.el.style.transform = `translateY(${deltaMin * ganttDrag.minuteHeight}px)`;
+  } else {
+    const deltaDays = Math.round((ev.clientY - ganttDrag.startY) / ganttDrag.rowHeight);
+    ganttDrag.el.style.transform = `translateY(${deltaDays * ganttDrag.rowHeight}px)`;
+  }
 });
 
 function finishGanttDrag(ev, commit) {
@@ -1713,13 +1741,35 @@ function finishGanttDrag(ev, commit) {
   drag.el.style.transform = '';
   if (drag.el.hasPointerCapture(drag.pointerId)) drag.el.releasePointerCapture(drag.pointerId);
   if (!commit) return;
-  const deltaDays = Math.round((ev.clientY - drag.startY) / drag.rowHeight);
   const t = taskById(drag.taskId);
-  if (!t || !deltaDays) return;
+  if (!t) return;
+  if (drag.action === 'gantt-day-drag') {
+    const deltaMin = roundToStep((ev.clientY - drag.startY) / drag.minuteHeight, 5);
+    if (!deltaMin) return;
+    const duration = drag.endMin - drag.startMin;
+    const newStart = Math.max(0, Math.min(1440 - duration, drag.startMin + deltaMin));
+    const newEnd = newStart + duration;
+    lastGanttDragUndo = {
+      taskId: t.id,
+      plannedStart: t.plannedStart,
+      plannedEnd: t.plannedEnd,
+      plannedStartTime: t.plannedStartTime,
+      plannedEndTime: t.plannedEndTime,
+    };
+    t.plannedStartTime = minutesToTime(newStart);
+    t.plannedEndTime = newEnd >= 1440 ? '23:59' : minutesToTime(newEnd);
+    save();
+    renderAll();
+    return;
+  }
+  const deltaDays = Math.round((ev.clientY - drag.startY) / drag.rowHeight);
+  if (!deltaDays) return;
   lastGanttDragUndo = {
     taskId: t.id,
     plannedStart: t.plannedStart,
     plannedEnd: t.plannedEnd,
+    plannedStartTime: t.plannedStartTime,
+    plannedEndTime: t.plannedEndTime,
   };
   t.plannedStart = addDays(t.plannedStart, deltaDays);
   t.plannedEnd = addDays(t.plannedEnd, deltaDays);
@@ -1747,6 +1797,8 @@ function undoLastGanttDrag() {
   }
   t.plannedStart = lastGanttDragUndo.plannedStart;
   t.plannedEnd = lastGanttDragUndo.plannedEnd;
+  t.plannedStartTime = lastGanttDragUndo.plannedStartTime;
+  t.plannedEndTime = lastGanttDragUndo.plannedEndTime;
   lastGanttDragUndo = null;
   save();
   renderAll();

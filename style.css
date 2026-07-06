@@ -602,6 +602,18 @@ details.done-section summary {
   box-shadow: var(--shadow);
 }
 
+.tl-block.gantt-day-draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.tl-block.gantt-day-draggable.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  z-index: 3;
+}
+
 .tl-block.running {
   outline: 2px dashed rgba(255, 255, 255, 0.7);
   outline-offset: -3px;
