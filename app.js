@@ -574,10 +574,10 @@ function renderTodo() {
             <select name="projectId">${projectOptions(t.projectId)}</select>
             <span class="plan-inputs">予定
               <input type="date" name="plannedStart" value="${t.plannedStart || ''}">
-              <input type="time" name="plannedStartTime" step="600" value="${t.plannedStartTime || ''}">
+              <input type="time" name="plannedStartTime" step="300" value="${t.plannedStartTime || ''}">
               〜
               <input type="date" name="plannedEnd" value="${t.plannedEnd || ''}">
-              <input type="time" name="plannedEndTime" step="600" value="${t.plannedEndTime || ''}">
+              <input type="time" name="plannedEndTime" step="300" value="${t.plannedEndTime || ''}">
             </span>
             <select name="repeat">${repeatOptions(t.repeat || '')}</select>
             <span class="estimate-input">見積
@@ -654,10 +654,10 @@ function renderTodo() {
         <select name="projectId">${projectOptions(ui.todoFilterProject || '')}</select>
         <span class="plan-inputs">予定
           <input type="date" name="plannedStart">
-          <input type="time" name="plannedStartTime" step="600">
+          <input type="time" name="plannedStartTime" step="300">
           〜
           <input type="date" name="plannedEnd">
-          <input type="time" name="plannedEndTime" step="600">
+          <input type="time" name="plannedEndTime" step="300">
         </span>
         <select name="repeat">${repeatOptions('')}</select>
         <span class="estimate-input">見積
@@ -777,9 +777,9 @@ function renderTimeline() {
       return `
         <li class="entry-item">
           <form class="edit-form" data-action-submit="save-entry" data-id="${e.id}">
-            <input type="time" name="start" value="${toTimeStr(e.clipStart)}" step="600" required>
+            <input type="time" name="start" value="${toTimeStr(e.clipStart)}" step="300" required>
             〜
-            <input type="time" name="end" value="${e.end === null ? '' : toTimeStr(e.clipEnd)}" step="600" ${e.end === null ? 'disabled' : 'required'}>
+            <input type="time" name="end" value="${e.end === null ? '' : toTimeStr(e.clipEnd)}" step="300" ${e.end === null ? 'disabled' : 'required'}>
             <button class="btn btn-primary" type="submit">保存</button>
             <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
           </form>
@@ -831,9 +831,9 @@ function renderTimeline() {
       ${activeTasks.length ? `
         <form class="add-form" data-action-submit="add-entry">
           <select name="taskId" required>${taskOpts}</select>
-          <input type="time" name="start" step="600" required>
+          <input type="time" name="start" step="300" required>
           〜
-          <input type="time" name="end" step="600" required>
+          <input type="time" name="end" step="300" required>
           <button class="btn btn-primary" type="submit">追加</button>
         </form>
         <p class="task-meta" style="margin-top:8px">※ 上で選択中の日付(${fmtDateJa(ui.timelineDate)})に追加されます。終了が開始より前の場合は翌日扱いになります。</p>
