@@ -496,13 +496,9 @@ function buildHash() {
   if (ui.tab === 'timeline') {
     params.set('date', ui.timelineDate);
   } else if (ui.tab === 'gantt') {
-    params.set('view', ui.ganttView);
-    if (ui.ganttView === 'day') {
-      params.set('date', ui.ganttDate);
-    } else {
-      params.set('start', ui.ganttStart);
-      params.set('days', ui.ganttDays);
-    }
+    params.set('date', ui.ganttDate);
+    params.set('start', ui.ganttStart);
+    params.set('days', ui.ganttDays);
   } else if (ui.tab === 'report') {
     params.set('from', ui.aggFrom);
     params.set('to', ui.aggTo);
@@ -541,6 +537,7 @@ function renderAll() {
     b.classList.toggle('active', b.dataset.tab === ui.tab);
   });
   const view = document.getElementById('view');
+  view.classList.toggle('view-wide', ui.tab === 'gantt');
   if (ui.tab === 'todo') view.innerHTML = renderTodo();
   else if (ui.tab === 'timeline') view.innerHTML = renderTimeline();
   else if (ui.tab === 'gantt') view.innerHTML = renderGantt();
@@ -862,15 +859,11 @@ function renderTimeline() {
 
 /* ----- ガントチャートタブ ----- */
 
-function ganttViewToggle() {
-  return `<div class="view-toggle">
-    <button class="btn${ui.ganttView === 'week' ? ' btn-primary' : ''}" data-action="gantt-view" data-view="week">📅 1週間</button>
-    <button class="btn${ui.ganttView === 'day' ? ' btn-primary' : ''}" data-action="gantt-view" data-view="day">🕐 1日</button>
-  </div>`;
-}
-
 function renderGantt() {
-  return ui.ganttView === 'day' ? renderGanttDay() : renderGanttWeek();
+  return `<div class="gantt-board">
+    ${renderGanttDay()}
+    ${renderGanttWeek()}
+  </div>`;
 }
 
 // 1日単位: 時刻に沿ってタスクを配置するガントチャート(タイムラインと同じ時間軸UIを再利用)
@@ -913,8 +906,7 @@ function renderGanttDay() {
   return `
     <div class="card">
       <div class="tl-header">
-        <span class="tl-date-label">ガントチャート</span>
-        ${ganttViewToggle()}
+        <span class="tl-date-label">🕐 1日</span>
         <span class="tl-total">${fmtDateJa(day)}</span>
         <button class="btn" data-action="gantt-day-shift" data-days="-1">◀ 前日</button>
         <input type="date" value="${day}" data-action-change="gantt-date">
@@ -1005,8 +997,7 @@ function renderGanttWeek() {
   return `
     <div class="card">
       <div class="tl-header">
-        <span class="tl-date-label">ガントチャート</span>
-        ${ganttViewToggle()}
+        <span class="tl-date-label">📅 1週間</span>
         <span class="tl-total">${fmtDateJa(startStr)} 〜 ${fmtDateJa(endStr)}</span>
         <select data-action-change="gantt-days">
           <option value="14"${days === 14 ? ' selected' : ''}>2週間</option>
