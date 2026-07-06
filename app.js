@@ -233,6 +233,25 @@ function toTimeStr(ts) {
   return fmtTime(ts);
 }
 
+// 5分刻みの時刻<select>を生成
+function timeOptions(selected) {
+  let html = '';
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 5) {
+      const v = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      html += `<option value="${v}"${v === selected ? ' selected' : ''}>${v}</option>`;
+    }
+  }
+  return html;
+}
+
+function timeSelect(name, value, { required = false, disabled = false } = {}) {
+  const placeholder = value
+    ? ''
+    : `<option value="" selected${required ? ' disabled' : ''}>--:--</option>`;
+  return `<select name="${name}"${required ? ' required' : ''}${disabled ? ' disabled' : ''}>${placeholder}${timeOptions(value)}</select>`;
+}
+
 // 経過時間 → "1:23:45"
 function fmtClock(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -574,10 +593,10 @@ function renderTodo() {
             <select name="projectId">${projectOptions(t.projectId)}</select>
             <span class="plan-inputs">予定
               <input type="date" name="plannedStart" value="${t.plannedStart || ''}">
-              <input type="time" name="plannedStartTime" step="300" value="${t.plannedStartTime || ''}">
+              ${timeSelect('plannedStartTime', t.plannedStartTime || '')}
               〜
               <input type="date" name="plannedEnd" value="${t.plannedEnd || ''}">
-              <input type="time" name="plannedEndTime" step="300" value="${t.plannedEndTime || ''}">
+              ${timeSelect('plannedEndTime', t.plannedEndTime || '')}
             </span>
             <select name="repeat">${repeatOptions(t.repeat || '')}</select>
             <span class="estimate-input">見積
@@ -654,10 +673,10 @@ function renderTodo() {
         <select name="projectId">${projectOptions(ui.todoFilterProject || '')}</select>
         <span class="plan-inputs">予定
           <input type="date" name="plannedStart">
-          <input type="time" name="plannedStartTime" step="300">
+          ${timeSelect('plannedStartTime', '')}
           〜
           <input type="date" name="plannedEnd">
-          <input type="time" name="plannedEndTime" step="300">
+          ${timeSelect('plannedEndTime', '')}
         </span>
         <select name="repeat">${repeatOptions('')}</select>
         <span class="estimate-input">見積
@@ -777,9 +796,9 @@ function renderTimeline() {
       return `
         <li class="entry-item">
           <form class="edit-form" data-action-submit="save-entry" data-id="${e.id}">
-            <input type="time" name="start" value="${toTimeStr(e.clipStart)}" step="300" required>
+            ${timeSelect('start', toTimeStr(e.clipStart), { required: true })}
             〜
-            <input type="time" name="end" value="${e.end === null ? '' : toTimeStr(e.clipEnd)}" step="300" ${e.end === null ? 'disabled' : 'required'}>
+            ${timeSelect('end', e.end === null ? '' : toTimeStr(e.clipEnd), { required: e.end !== null, disabled: e.end === null })}
             <button class="btn btn-primary" type="submit">保存</button>
             <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
           </form>
@@ -831,9 +850,9 @@ function renderTimeline() {
       ${activeTasks.length ? `
         <form class="add-form" data-action-submit="add-entry">
           <select name="taskId" required>${taskOpts}</select>
-          <input type="time" name="start" step="300" required>
+          ${timeSelect('start', '', { required: true })}
           〜
-          <input type="time" name="end" step="300" required>
+          ${timeSelect('end', '', { required: true })}
           <button class="btn btn-primary" type="submit">追加</button>
         </form>
         <p class="task-meta" style="margin-top:8px">※ 上で選択中の日付(${fmtDateJa(ui.timelineDate)})に追加されます。終了が開始より前の場合は翌日扱いになります。</p>
