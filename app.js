@@ -32,6 +32,7 @@ const ui = {
   todoFilterClient: '',
   todoFilterProject: '',
   todoFilterImportance: '',
+  todoFilterMonth: '',
   editingTask: null,
   editingEntry: null,
   editingClient: null,
@@ -555,6 +556,12 @@ function totalChip(t, totalMs) {
 
 const HASH_TABS = ['todo', 'timeline', 'gantt', 'report', 'manage'];
 const HASH_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const HASH_MONTH_RE = /^\d{4}-\d{2}$/;
+
+function endOfMonthStr(monthStr) {
+  const [y, m] = monthStr.split('-').map(Number);
+  return toDateStr(new Date(y, m, 0));
+}
 
 // 現在のuiから「#タブ?パラメータ」形式のハッシュを作る(タブごとに意味のある値のみ)
 function buildHash() {
@@ -563,6 +570,7 @@ function buildHash() {
     if (ui.todoFilterClient) params.set('client', ui.todoFilterClient);
     if (ui.todoFilterProject) params.set('project', ui.todoFilterProject);
     if (ui.todoFilterImportance !== '') params.set('importance', ui.todoFilterImportance);
+    if (ui.todoFilterMonth) params.set('month', ui.todoFilterMonth);
   } else if (ui.tab === 'timeline') {
     params.set('date', ui.timelineDate);
   } else if (ui.tab === 'gantt') {
@@ -590,9 +598,11 @@ function applyHash() {
     const clientId = params.get('client') || '';
     const projectId = params.get('project') || '';
     const importance = params.get('importance');
+    const month = params.get('month') || '';
     ui.todoFilterClient = clientById(clientId) ? clientId : '';
     ui.todoFilterProject = projectById(projectId) ? projectId : '';
     ui.todoFilterImportance = ['0', '1', '2', '3'].includes(importance) ? importance : '';
+    ui.todoFilterMonth = HASH_MONTH_RE.test(month) ? month : '';
     const project = projectById(ui.todoFilterProject);
     if (project && ui.todoFilterClient && project.clientId !== ui.todoFilterClient) {
       ui.todoFilterProject = '';
@@ -754,6 +764,11 @@ function renderTodo() {
     const importance = Number(ui.todoFilterImportance);
     tasks = tasks.filter((t) => parseImportance(t.importance) === importance);
   }
+  if (ui.todoFilterMonth) {
+    const monthStart = `${ui.todoFilterMonth}-01`;
+    const monthEnd = endOfMonthStr(ui.todoFilterMonth);
+    tasks = tasks.filter((t) => t.plannedStart && t.plannedEnd && t.plannedStart <= monthEnd && t.plannedEnd >= monthStart);
+  }
   // 重要度が高い順。同じ重要度なら予定日が近い順(予定なしは後ろ)、同条件なら新しい順
   const active = tasks.filter((t) => !t.done).sort((a, b) => {
     const ai = parseImportance(a.importance);
@@ -798,6 +813,9 @@ function renderTodo() {
         </label>
         <label>重要度:
           <select data-action-change="todo-importance-filter">${importanceFilterOptions(ui.todoFilterImportance)}</select>
+        </label>
+        <label>年月:
+          <input type="month" data-action-change="todo-month-filter" value="${ui.todoFilterMonth}">
         </label>
       </div>
       <ul class="task-list">
@@ -1647,6 +1665,9 @@ document.addEventListener('change', (ev) => {
       break;
     case 'todo-importance-filter':
       ui.todoFilterImportance = el.value;
+      break;
+    case 'todo-month-filter':
+      ui.todoFilterMonth = HASH_MONTH_RE.test(el.value) ? el.value : '';
       break;
     case 'import-backup': {
       const file = el.files && el.files[0];
