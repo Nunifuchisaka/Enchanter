@@ -288,6 +288,12 @@ input:focus, select:focus {
   border-bottom: none;
 }
 
+.task-item.due-today {
+  border-radius: 8px;
+  background: rgba(217, 119, 6, 0.12);
+  box-shadow: inset 3px 0 0 #d97706;
+}
+
 .task-item input[type="checkbox"] {
   width: 17px;
   height: 17px;
@@ -341,6 +347,12 @@ input:focus, select:focus {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+}
+
+.chip.plan-due-today {
+  background: #d97706;
+  color: #fff;
+  font-weight: 700;
 }
 
 .chip.plan-overdue {

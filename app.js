@@ -524,11 +524,18 @@ function planChip(t) {
     if (t.plannedEnd < today) {
       cls = ' plan-overdue';
       note = ' 超過';
+    } else if (t.plannedEnd === today) {
+      cls = ' plan-due-today';
+      note = ' 本日締め切り';
     } else if (t.plannedStart <= today) {
       cls = ' plan-today';
     }
   }
   return `<span class="chip${cls}">📅 ${planLabel(t)}${note}</span>`;
+}
+
+function isDueToday(t) {
+  return !t.done && t.plannedEnd === toDateStr(new Date());
 }
 
 function projectChip(projectId) {
@@ -729,7 +736,7 @@ function renderTodo() {
       timerBtn = `<button class="timer-btn start" data-action="start-timer" data-id="${t.id}">▶ 計測</button>`;
     }
     return `
-      <li class="task-item ${t.done ? 'done' : ''}">
+      <li class="task-item ${t.done ? 'done' : ''}${isDueToday(t) ? ' due-today' : ''}">
         <input type="checkbox" ${t.done ? 'checked' : ''} data-action-change="toggle-done" data-id="${t.id}">
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
