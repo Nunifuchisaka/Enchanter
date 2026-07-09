@@ -29,7 +29,9 @@ const ui = {
   ganttDate: toDateStr(new Date()),
   aggFrom: toDateStr(startOfWeek(new Date())),
   aggTo: toDateStr(new Date()),
+  todoFilterClient: '',
   todoFilterProject: '',
+  todoFilterImportance: '',
   editingTask: null,
   editingEntry: null,
   editingClient: null,
@@ -355,6 +357,15 @@ function importanceOptions(selected) {
   return html;
 }
 
+function importanceFilterOptions(selected) {
+  let html = `<option value=""${selected === '' ? ' selected' : ''}>すべて</option>`;
+  IMPORTANCE_LABELS.forEach((label, value) => {
+    const stringValue = String(value);
+    html += `<option value="${stringValue}"${stringValue === selected ? ' selected' : ''}>${label}</option>`;
+  });
+  return html;
+}
+
 function importanceChip(t) {
   const importance = parseImportance(t.importance);
   if (!importance) return '';
@@ -482,9 +493,20 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-function projectOptions(selectedId, includeEmptyLabel) {
+function clientOptions(selectedId, includeEmptyLabel) {
+  let html = `<option value="">${includeEmptyLabel || 'クライアントなし'}</option>`;
+  const sorted = [...data.clients].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  for (const c of sorted) {
+    const sel = c.id === selectedId ? ' selected' : '';
+    html += `<option value="${c.id}"${sel}>${esc(c.name)}</option>`;
+  }
+  return html;
+}
+
+function projectOptions(selectedId, includeEmptyLabel, clientId = '') {
   let html = `<option value="">${includeEmptyLabel || 'プロジェクトなし'}</option>`;
-  const sorted = [...data.projects].sort((a, b) => projectLabel(a.id).localeCompare(projectLabel(b.id), 'ja'));
+  const projects = clientId ? data.projects.filter((p) => p.clientId === clientId) : data.projects;
+  const sorted = [...projects].sort((a, b) => projectLabel(a.id).localeCompare(projectLabel(b.id), 'ja'));
   for (const p of sorted) {
     const sel = p.id === selectedId ? ' selected' : '';
     html += `<option value="${p.id}"${sel}>${esc(projectLabel(p.id))}</option>`;
@@ -537,7 +559,11 @@ const HASH_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // 現在のuiから「#タブ?パラメータ」形式のハッシュを作る(タブごとに意味のある値のみ)
 function buildHash() {
   const params = new URLSearchParams();
-  if (ui.tab === 'timeline') {
+  if (ui.tab === 'todo') {
+    if (ui.todoFilterClient) params.set('client', ui.todoFilterClient);
+    if (ui.todoFilterProject) params.set('project', ui.todoFilterProject);
+    if (ui.todoFilterImportance !== '') params.set('importance', ui.todoFilterImportance);
+  } else if (ui.tab === 'timeline') {
     params.set('date', ui.timelineDate);
   } else if (ui.tab === 'gantt') {
     params.set('date', ui.ganttDate);
@@ -560,7 +586,20 @@ function applyHash() {
   ui.tab = tab;
   const params = new URLSearchParams(qs || '');
   const date = params.get('date');
-  if (tab === 'timeline' && HASH_DATE_RE.test(date || '')) {
+  if (tab === 'todo') {
+    const clientId = params.get('client') || '';
+    const projectId = params.get('project') || '';
+    const importance = params.get('importance');
+    ui.todoFilterClient = clientById(clientId) ? clientId : '';
+    ui.todoFilterProject = projectById(projectId) ? projectId : '';
+    ui.todoFilterImportance = ['0', '1', '2', '3'].includes(importance) ? importance : '';
+    const project = projectById(ui.todoFilterProject);
+    if (project && ui.todoFilterClient && project.clientId !== ui.todoFilterClient) {
+      ui.todoFilterProject = '';
+    } else if (project && !ui.todoFilterClient) {
+      ui.todoFilterClient = project.clientId || '';
+    }
+  } else if (tab === 'timeline' && HASH_DATE_RE.test(date || '')) {
     ui.timelineDate = date;
   } else if (tab === 'gantt') {
     const view = params.get('view');
@@ -624,6 +663,12 @@ function renderRunningBox() {
 
 function renderTodo() {
   const now = Date.now();
+  const selectedProject = projectById(ui.todoFilterProject);
+  if (selectedProject && ui.todoFilterClient && selectedProject.clientId !== ui.todoFilterClient) {
+    ui.todoFilterProject = '';
+  } else if (selectedProject && !ui.todoFilterClient) {
+    ui.todoFilterClient = selectedProject.clientId || '';
+  }
 
   const taskRow = (t) => {
     if (ui.editingTask === t.id) {
@@ -696,8 +741,18 @@ function renderTodo() {
   };
 
   let tasks = [...data.tasks];
+  if (ui.todoFilterClient) {
+    tasks = tasks.filter((t) => {
+      const project = projectById(t.projectId);
+      return project && project.clientId === ui.todoFilterClient;
+    });
+  }
   if (ui.todoFilterProject) {
     tasks = tasks.filter((t) => t.projectId === ui.todoFilterProject);
+  }
+  if (ui.todoFilterImportance !== '') {
+    const importance = Number(ui.todoFilterImportance);
+    tasks = tasks.filter((t) => parseImportance(t.importance) === importance);
   }
   // 重要度が高い順。同じ重要度なら予定日が近い順(予定なしは後ろ)、同条件なら新しい順
   const active = tasks.filter((t) => !t.done).sort((a, b) => {
@@ -716,7 +771,7 @@ function renderTodo() {
       <h2>➕ タスクを追加</h2>
       <form class="add-form" data-action-submit="add-task">
         <input type="text" name="title" placeholder="タスク名を入力..." required autocomplete="off">
-        <select name="projectId">${projectOptions(ui.todoFilterProject || '')}</select>
+        <select name="projectId">${projectOptions(ui.todoFilterProject || '', undefined, ui.todoFilterClient)}</select>
         <span class="plan-inputs">予定
           <input type="date" name="plannedStart">
           ${timeSelect('plannedStartTime', '')}
@@ -735,8 +790,14 @@ function renderTodo() {
     <div class="card">
       <h2>📋 Todoリスト</h2>
       <div class="filter-row">
+        <label>クライアント:
+          <select data-action-change="todo-client-filter">${clientOptions(ui.todoFilterClient, 'すべて')}</select>
+        </label>
         <label>プロジェクト:
-          <select data-action-change="todo-filter">${projectOptions(ui.todoFilterProject, 'すべて')}</select>
+          <select data-action-change="todo-filter">${projectOptions(ui.todoFilterProject, 'すべて', ui.todoFilterClient)}</select>
+        </label>
+        <label>重要度:
+          <select data-action-change="todo-importance-filter">${importanceFilterOptions(ui.todoFilterImportance)}</select>
         </label>
       </div>
       <ul class="task-list">
@@ -1569,8 +1630,23 @@ document.addEventListener('change', (ev) => {
       save();
       break;
     }
+    case 'todo-client-filter': {
+      ui.todoFilterClient = el.value;
+      const project = projectById(ui.todoFilterProject);
+      if (project && ui.todoFilterClient && project.clientId !== ui.todoFilterClient) {
+        ui.todoFilterProject = '';
+      }
+      break;
+    }
     case 'todo-filter':
       ui.todoFilterProject = el.value;
+      if (ui.todoFilterProject) {
+        const project = projectById(ui.todoFilterProject);
+        ui.todoFilterClient = project ? (project.clientId || '') : ui.todoFilterClient;
+      }
+      break;
+    case 'todo-importance-filter':
+      ui.todoFilterImportance = el.value;
       break;
     case 'import-backup': {
       const file = el.files && el.files[0];
