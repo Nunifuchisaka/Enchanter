@@ -333,9 +333,32 @@ function parseEstimate(v) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
+// フォームの重要度入力を0〜3の整数へ正規化
+function parseImportance(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 && n <= 3 ? n : 0;
+}
+
 // 指定日において、タスクの開始/終了のうちその日にあたる側に時刻指定があるか
 function hasTimeOnDay(t, day) {
   return (t.plannedStart === day && !!t.plannedStartTime) || (t.plannedEnd === day && !!t.plannedEndTime);
+}
+
+const IMPORTANCE_LABELS = ['指定なし', '低', '中', '高'];
+
+function importanceOptions(selected) {
+  let html = '';
+  const current = parseImportance(selected);
+  IMPORTANCE_LABELS.forEach((label, value) => {
+    html += `<option value="${value}"${value === current ? ' selected' : ''}>重要度: ${label}</option>`;
+  });
+  return html;
+}
+
+function importanceChip(t) {
+  const importance = parseImportance(t.importance);
+  if (!importance) return '';
+  return `<span class="chip importance-${importance}">重要度 ${IMPORTANCE_LABELS[importance]}</span>`;
 }
 
 const REPEAT_LABELS = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
@@ -379,6 +402,7 @@ function nextOccurrence(t) {
     plannedEndTime: t.plannedEndTime || null,
     repeat: t.repeat,
     estimateMinutes: t.estimateMinutes || null,
+    importance: parseImportance(t.importance),
     note: t.note || null,
   };
 }
@@ -615,6 +639,7 @@ function renderTodo() {
               <input type="date" name="plannedEnd" value="${t.plannedEnd || ''}">
               ${timeSelect('plannedEndTime', t.plannedEndTime || '')}
             </span>
+            <select name="importance">${importanceOptions(t.importance)}</select>
             <select name="repeat">${repeatOptions(t.repeat || '')}</select>
             <span class="estimate-input">見積
               <input type="number" name="estimateMinutes" min="0" value="${t.estimateMinutes || ''}" placeholder="--">分
@@ -656,6 +681,7 @@ function renderTodo() {
           ${t.note ? `<div class="task-note">${esc(t.note)}</div>` : ''}
           <div class="task-meta">
             ${projectChip(t.projectId)}
+            ${importanceChip(t)}
             ${planChip(t)}
             ${repeatChip(t)}
             ${totalChip(t, totalMs)}
@@ -673,8 +699,11 @@ function renderTodo() {
   if (ui.todoFilterProject) {
     tasks = tasks.filter((t) => t.projectId === ui.todoFilterProject);
   }
-  // 予定日が近い順(予定なしは後ろ)、同条件なら新しい順
+  // 重要度が高い順。同じ重要度なら予定日が近い順(予定なしは後ろ)、同条件なら新しい順
   const active = tasks.filter((t) => !t.done).sort((a, b) => {
+    const ai = parseImportance(a.importance);
+    const bi = parseImportance(b.importance);
+    if (ai !== bi) return bi - ai;
     const ap = a.plannedStart || '9999-99-99';
     const bp = b.plannedStart || '9999-99-99';
     if (ap !== bp) return ap < bp ? -1 : 1;
@@ -695,6 +724,7 @@ function renderTodo() {
           <input type="date" name="plannedEnd">
           ${timeSelect('plannedEndTime', '')}
         </span>
+        <select name="importance">${importanceOptions(0)}</select>
         <select name="repeat">${repeatOptions('')}</select>
         <span class="estimate-input">見積
           <input type="number" name="estimateMinutes" min="0" placeholder="--">分
@@ -1596,6 +1626,7 @@ document.addEventListener('submit', (ev) => {
         completedAt: null,
         repeat: fd.get('repeat') || null,
         estimateMinutes: parseEstimate(fd.get('estimateMinutes')),
+        importance: parseImportance(fd.get('importance')),
         note: null,
         ...planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')),
       });
@@ -1609,6 +1640,7 @@ document.addEventListener('submit', (ev) => {
       t.projectId = fd.get('projectId') || null;
       t.repeat = fd.get('repeat') || null;
       t.estimateMinutes = parseEstimate(fd.get('estimateMinutes'));
+      t.importance = parseImportance(fd.get('importance'));
       t.note = String(fd.get('note') || '').trim() || null;
       Object.assign(t, planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')));
       clearEditing();

@@ -22,7 +22,11 @@ const DEFAULT_COLOR = '#7c5cff';
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const REPEAT_VALUES = new Set(['daily', 'weekly', 'monthly']);
 
-// color/repeatは通常UI(color入力・select)で値が制限されるが、APIを直接叩いたり
+function sanitizeImportance(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 3 ? value : 0;
+}
+
+// color/repeat/importanceは通常UI(color入力・select)で値が制限されるが、APIを直接叩いたり
 // データファイルを手編集された場合にHTML属性コンテキストへ不正な文字列(XSS)が
 // 混入しないよう、保存前にサーバー側でも値の形式を強制する
 function sanitizeData(d) {
@@ -39,6 +43,7 @@ function sanitizeData(d) {
       estimateMinutes: Number.isFinite(t.estimateMinutes) && t.estimateMinutes > 0
         ? Math.round(t.estimateMinutes)
         : null,
+      importance: sanitizeImportance(t.importance),
       note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
     })),
     entries: d.entries || [],

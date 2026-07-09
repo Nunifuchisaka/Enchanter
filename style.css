@@ -349,6 +349,23 @@ input:focus, select:focus {
   font-weight: 600;
 }
 
+.chip.importance-1 {
+  background: rgba(33, 150, 83, 0.14);
+  color: #1f7a46;
+}
+
+.chip.importance-2 {
+  background: rgba(217, 119, 6, 0.16);
+  color: #a15c05;
+  font-weight: 600;
+}
+
+.chip.importance-3 {
+  background: rgba(220, 38, 38, 0.14);
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .plan-inputs {
   display: inline-flex;
   align-items: center;
