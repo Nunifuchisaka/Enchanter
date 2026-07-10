@@ -405,7 +405,7 @@ function nextOccurrence(t) {
     id: uid(),
     title: t.title,
     projectId: t.projectId,
-    done: false,
+    status: 'todo',
     createdAt: Date.now(),
     completedAt: null,
     plannedStart,
@@ -520,7 +520,7 @@ function planChip(t) {
   const today = toDateStr(new Date());
   let cls = '';
   let note = '';
-  if (!t.done) {
+  if (t.status === 'todo') {
     if (t.plannedEnd < today) {
       cls = ' plan-overdue';
       note = ' 超過';
@@ -535,7 +535,21 @@ function planChip(t) {
 }
 
 function isDueToday(t) {
-  return !t.done && t.plannedEnd === toDateStr(new Date());
+  return t.status === 'todo' && t.plannedEnd === toDateStr(new Date());
+}
+
+function statusRowClass(t) {
+  if (t.status === 'done') return 'done';
+  if (t.status === 'waiting_review') return 'waiting-review';
+  return '';
+}
+
+const TASK_STATUS_ORDER = ['todo', 'waiting_review', 'done'];
+const TASK_STATUS_LABELS = { todo: '未着手', waiting_review: '作業済み(確認待ち)', done: '完了' };
+
+function nextTaskStatus(status) {
+  const idx = TASK_STATUS_ORDER.indexOf(status);
+  return TASK_STATUS_ORDER[(idx + 1) % TASK_STATUS_ORDER.length];
 }
 
 function projectChip(projectId) {
@@ -717,7 +731,7 @@ function renderTodo() {
       .reduce((sum, e) => sum + entryDur(e, now), 0);
     const running = runningEntryForTask(t.id);
     let timerBtn;
-    if (t.done) {
+    if (t.status === 'done') {
       timerBtn = '';
     } else if (running && ui.editingEntry === running.id) {
       timerBtn = `
@@ -736,8 +750,11 @@ function renderTodo() {
       timerBtn = `<button class="timer-btn start" data-action="start-timer" data-id="${t.id}">▶ 計測</button>`;
     }
     return `
-      <li class="task-item ${t.done ? 'done' : ''}${isDueToday(t) ? ' due-today' : ''}">
-        <input type="checkbox" ${t.done ? 'checked' : ''} data-action-change="toggle-done" data-id="${t.id}">
+      <li class="task-item ${statusRowClass(t)}${isDueToday(t) ? ' due-today' : ''}">
+        <button type="button" class="status-toggle${statusRowClass(t) ? ' status-' + statusRowClass(t) : ''}"
+          data-action="cycle-status" data-id="${t.id}"
+          aria-label="ステータス: ${TASK_STATUS_LABELS[t.status]}(クリックで次の状態へ)"
+          title="クリックで状態を切り替え(未着手 → 作業済み → 完了)"></button>
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
           ${t.note ? `<div class="task-note">${esc(t.note)}</div>` : ''}
@@ -777,7 +794,7 @@ function renderTodo() {
     tasks = tasks.filter((t) => t.plannedStart && t.plannedEnd && t.plannedStart <= monthEnd && t.plannedEnd >= monthStart);
   }
   // 重要度が高い順。同じ重要度なら予定日が近い順(予定なしは後ろ)、同条件なら新しい順
-  const active = tasks.filter((t) => !t.done).sort((a, b) => {
+  const compareActiveTasks = (a, b) => {
     const ai = parseImportance(a.importance);
     const bi = parseImportance(b.importance);
     if (ai !== bi) return bi - ai;
@@ -785,8 +802,10 @@ function renderTodo() {
     const bp = b.plannedStart || '9999-99-99';
     if (ap !== bp) return ap < bp ? -1 : 1;
     return b.createdAt - a.createdAt;
-  });
-  const done = tasks.filter((t) => t.done).sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+  };
+  const active = tasks.filter((t) => t.status === 'todo').sort(compareActiveTasks);
+  const waitingReview = tasks.filter((t) => t.status === 'waiting_review').sort(compareActiveTasks);
+  const done = tasks.filter((t) => t.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
   return `
     <div class="card">
@@ -828,6 +847,11 @@ function renderTodo() {
       <ul class="task-list">
         ${active.length ? active.map(taskRow).join('') : '<li class="empty">未完了のタスクはありません</li>'}
       </ul>
+      ${waitingReview.length ? `
+        <div class="waiting-review-section">
+          <h3>⏳ 作業済み・確認待ち (${waitingReview.length})</h3>
+          <ul class="task-list">${waitingReview.map(taskRow).join('')}</ul>
+        </div>` : ''}
       ${done.length ? `
         <details class="done-section">
           <summary>完了済み (${done.length})</summary>
@@ -865,12 +889,13 @@ function renderPlannedForDay(day, opts = {}) {
   let planned = data.tasks
     .filter((t) => t.plannedStart && t.plannedStart <= day && day <= t.plannedEnd);
   if (opts.untimedOnly) planned = planned.filter((t) => !hasTimeOnDay(t, day));
-  planned = planned.sort((a, b) => Number(a.done) - Number(b.done) || b.createdAt - a.createdAt);
+  const statusRank = { todo: 0, waiting_review: 1, done: 2 };
+  planned = planned.sort((a, b) => statusRank[a.status] - statusRank[b.status] || b.createdAt - a.createdAt);
   if (!planned.length) return '';
   const items = planned.map((t) => `
-    <span class="plan-task ${t.done ? 'done' : ''}">
+    <span class="plan-task ${statusRowClass(t)}">
       <span class="chip-dot" style="background:${projectColor(t.projectId)}"></span>
-      ${t.done ? '✔ ' : ''}${esc(t.title)}
+      ${t.status === 'done' ? '✔ ' : t.status === 'waiting_review' ? '⏳ ' : ''}${esc(t.title)}
     </span>`).join('');
   return `<div class="plan-day-row"><span class="plan-day-label">${opts.label || '📅 この日の予定:'}</span>${items}</div>`;
 }
@@ -950,7 +975,7 @@ function renderTimeline() {
       </li>`;
   };
 
-  const activeTasks = data.tasks.filter((t) => !t.done);
+  const activeTasks = data.tasks.filter((t) => t.status !== 'done');
   const taskOpts = activeTasks
     .sort((a, b) => b.createdAt - a.createdAt)
     .map((t) => `<option value="${t.id}">${esc(t.title)}</option>`)
@@ -1032,10 +1057,10 @@ function renderGanttDay() {
     const draggable = t.plannedStart === day && t.plannedEnd === day;
     const top = ((it.clipStart - dayStart) / 86400000) * 100;
     const height = ((it.clipEnd - it.clipStart) / 86400000) * 100;
-    const overdue = !t.done && t.plannedEnd < todayStr;
-    const cls = `${t.done ? ' plan-done' : ''}${overdue ? ' plan-overdue' : ''}${draggable ? ' gantt-day-draggable' : ''}`;
+    const overdue = t.status === 'todo' && t.plannedEnd < todayStr;
+    const cls = `${t.status === 'done' ? ' plan-done' : t.status === 'waiting_review' ? ' plan-waiting' : ''}${overdue ? ' plan-overdue' : ''}${draggable ? ' gantt-day-draggable' : ''}`;
     const tip = `${t.title}${project ? ` (${project.name})` : ''}\n${fmtTime(it.clipStart)} 〜 ${fmtTime(it.clipEnd)}` +
-      `${overdue ? '\n⚠ 期限超過' : ''}${t.done ? '\n✔ 完了' : ''}`;
+      `${overdue ? '\n⚠ 期限超過' : ''}${t.status === 'waiting_review' ? '\n⏳ 作業済み(確認待ち)' : ''}${t.status === 'done' ? '\n✔ 完了' : ''}`;
     const label = project ? `${esc(t.title)} <span class="tl-block-project">・${esc(project.name)}</span>` : esc(t.title);
     return `<div class="tl-block${cls}"
       style="top:${top}%;height:${Math.max(height, 0.4)}%;left:${4 + it.lane * 136}px;background:${projectColor(t.projectId)}"
@@ -1119,14 +1144,14 @@ function renderGanttWeek() {
     const col = idx + 2;
     const sIdx = Math.max(dayIdx(t.plannedStart), 0);
     const eIdx = Math.min(dayIdx(t.plannedEnd), days - 1);
-    const overdue = !t.done && t.plannedEnd < todayStr;
-    const cls = `${t.done ? ' done' : ''}${overdue ? ' overdue' : ''}` +
+    const overdue = t.status === 'todo' && t.plannedEnd < todayStr;
+    const cls = `${statusRowClass(t) ? ' ' + statusRowClass(t) : ''}${overdue ? ' overdue' : ''}` +
       `${t.plannedStart < startStr ? ' clip-top' : ''}${t.plannedEnd > endStr ? ' clip-bottom' : ''}`;
     const totalDays = dayIdx(t.plannedEnd) - dayIdx(t.plannedStart) + 1;
     const tip = `${t.title}${c.project ? ` (${c.project.name})` : ''}\n${planLabel(t)} (${totalDays}日間)` +
-      `${overdue ? '\n⚠ 期限超過' : ''}${t.done ? '\n✔ 完了' : ''}`;
+      `${overdue ? '\n⚠ 期限超過' : ''}${t.status === 'waiting_review' ? '\n⏳ 作業済み(確認待ち)' : ''}${t.status === 'done' ? '\n✔ 完了' : ''}`;
     colHeads += `
-      <div class="gantt-col-label${t.done ? ' done' : ''}" style="grid-column:${col}" title="${esc(tip)}">
+      <div class="gantt-col-label${statusRowClass(t) ? ' ' + statusRowClass(t) : ''}" style="grid-column:${col}" title="${esc(tip)}">
         <span class="chip-dot" style="background:${projectColor(t.projectId)}"></span>
         ${overdue ? '<span class="overdue-mark">⚠</span> ' : ''}${esc(t.title)}
         ${c.project ? `<span class="gantt-col-project">・${esc(c.project.name)}</span>` : ''}
@@ -1525,6 +1550,23 @@ document.addEventListener('click', (ev) => {
       clearEditing();
       ui.editingTask = id;
       break;
+    case 'cycle-status': {
+      const t = taskById(id);
+      if (!t) return;
+      t.status = nextTaskStatus(t.status);
+      if (t.status === 'done') {
+        t.completedAt = Date.now();
+        // 計測中のタスクを完了したらそのタスクの計測を停止
+        const r = runningEntryForTask(t.id);
+        if (r) stopTimer(r.id);
+        // 繰り返しタスクを完了したら次回分を自動生成
+        if (t.repeat) data.tasks.push(nextOccurrence(t));
+      } else {
+        t.completedAt = null;
+      }
+      save();
+      break;
+    }
     case 'del-task':
       deleteTask(id);
       return;
@@ -1640,21 +1682,6 @@ document.addEventListener('change', (ev) => {
   const el = ev.target.closest('[data-action-change]');
   if (!el) return;
   switch (el.dataset.actionChange) {
-    case 'toggle-done': {
-      const t = taskById(el.dataset.id);
-      if (!t) return;
-      t.done = el.checked;
-      t.completedAt = el.checked ? Date.now() : null;
-      // 計測中のタスクを完了したらそのタスクの計測を停止
-      const r = runningEntryForTask(t.id);
-      if (el.checked && r) stopTimer(r.id);
-      // 繰り返しタスクを完了したら次回分を自動生成
-      if (el.checked && t.repeat) {
-        data.tasks.push(nextOccurrence(t));
-      }
-      save();
-      break;
-    }
     case 'todo-client-filter': {
       ui.todoFilterClient = el.value;
       const project = projectById(ui.todoFilterProject);
@@ -1725,7 +1752,7 @@ document.addEventListener('submit', (ev) => {
         id: uid(),
         title,
         projectId: fd.get('projectId') || null,
-        done: false,
+        status: 'todo',
         createdAt: Date.now(),
         completedAt: null,
         repeat: fd.get('repeat') || null,
