@@ -9,6 +9,8 @@
   --accent-soft: #efeaff;
   --danger: #d95f5f;
   --ok: #42b862;
+  --review: #2f7dd1;
+  --review-soft: #e8f1fc;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(43, 39, 64, 0.08);
 }
@@ -23,6 +25,8 @@
     --text-sub: #9a95b3;
     --accent: #9d85ff;
     --accent-soft: #322b52;
+    --review: #6fa8e8;
+    --review-soft: #253347;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   }
 }
@@ -294,11 +298,52 @@ input:focus, select:focus {
   box-shadow: inset 3px 0 0 #d97706;
 }
 
-.task-item input[type="checkbox"] {
+.status-toggle {
   width: 17px;
   height: 17px;
-  accent-color: var(--accent);
   flex-shrink: 0;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  color: transparent;
+  cursor: pointer;
+}
+
+.status-toggle:hover {
+  border-color: var(--accent);
+}
+
+.status-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.status-toggle.status-waiting-review {
+  border-color: var(--review);
+  background: var(--review-soft);
+  color: var(--review);
+}
+
+.status-toggle.status-waiting-review::after {
+  content: '–';
+}
+
+.status-toggle.status-done {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  opacity: 0.55;
+}
+
+.status-toggle.status-done::after {
+  content: '✓';
 }
 
 .task-main {
@@ -418,6 +463,11 @@ input:focus, select:focus {
   text-decoration: line-through;
 }
 
+.plan-task.waiting-review {
+  color: var(--review);
+  font-weight: 600;
+}
+
 .task-actions {
   display: flex;
   align-items: center;
@@ -463,6 +513,19 @@ details.done-section summary {
   color: var(--text-sub);
   font-weight: 600;
   padding: 4px 0;
+}
+
+.waiting-review-section {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.waiting-review-section h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--review);
+  margin-bottom: 6px;
 }
 
 .task-note {
@@ -691,6 +754,11 @@ details.done-section summary {
   text-decoration: line-through;
 }
 
+.tl-block.plan-waiting {
+  outline: 2px solid var(--review);
+  outline-offset: -2px;
+}
+
 .tl-block.plan-overdue {
   box-shadow: 0 0 0 2px var(--danger);
 }
@@ -843,6 +911,11 @@ details.done-section summary {
   text-decoration: line-through;
 }
 
+.gantt-col-label.waiting-review {
+  color: var(--review);
+  font-weight: 600;
+}
+
 .gantt-col-project {
   color: var(--text-sub);
   font-size: 12px;
@@ -877,6 +950,10 @@ details.done-section summary {
 
 .gantt-bar-v.done {
   opacity: 0.4;
+}
+
+.gantt-bar-v.waiting-review {
+  box-shadow: 0 0 0 2px var(--review);
 }
 
 .gantt-bar-v.overdue {

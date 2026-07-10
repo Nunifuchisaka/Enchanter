@@ -21,9 +21,16 @@ const EMPTY_DATA = { clients: [], projects: [], tasks: [], entries: [] };
 const DEFAULT_COLOR = '#7c5cff';
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const REPEAT_VALUES = new Set(['daily', 'weekly', 'monthly']);
+const TASK_STATUSES = new Set(['todo', 'waiting_review', 'done']);
 
 function sanitizeImportance(value) {
   return Number.isInteger(value) && value >= 0 && value <= 3 ? value : 0;
+}
+
+// status未設定の旧データ(done: booleanのみ)を新形式へ変換する後方互換マイグレーション
+function sanitizeStatus(t) {
+  if (TASK_STATUSES.has(t.status)) return t.status;
+  return t.done === true ? 'done' : 'todo';
 }
 
 // color/repeat/importanceは通常UI(color入力・select)で値が制限されるが、APIを直接叩いたり
@@ -36,25 +43,33 @@ function sanitizeData(d) {
       ...p,
       color: COLOR_RE.test(p.color) ? p.color : DEFAULT_COLOR,
     })),
-    tasks: (d.tasks || []).map((t) => ({
-      ...t,
-      repeat: REPEAT_VALUES.has(t.repeat) ? t.repeat : null,
-      // estimateMinutesはvalue属性に埋め込まれるため正の整数のみ許可
-      estimateMinutes: Number.isFinite(t.estimateMinutes) && t.estimateMinutes > 0
-        ? Math.round(t.estimateMinutes)
-        : null,
-      importance: sanitizeImportance(t.importance),
-      note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
-      subtasks: Array.isArray(t.subtasks)
-        ? t.subtasks
-            .filter((s) => s && typeof s.title === 'string' && s.title.trim() !== '')
-            .map((s) => ({
-              id: typeof s.id === 'string' && s.id ? s.id : crypto.randomUUID(),
-              title: s.title,
-              done: s.done === true,
-            }))
-        : [],
-    })),
+    tasks: (d.tasks || []).map((t) => {
+      const { done, ...rest } = t; // 旧フィールドは保存先から除去する
+      const status = sanitizeStatus(t);
+      return {
+        ...rest,
+        status,
+        completedAt: status === 'done'
+          ? (Number.isFinite(t.completedAt) ? t.completedAt : Date.now())
+          : null,
+        repeat: REPEAT_VALUES.has(t.repeat) ? t.repeat : null,
+        // estimateMinutesはvalue属性に埋め込まれるため正の整数のみ許可
+        estimateMinutes: Number.isFinite(t.estimateMinutes) && t.estimateMinutes > 0
+          ? Math.round(t.estimateMinutes)
+          : null,
+        importance: sanitizeImportance(t.importance),
+        note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
+        subtasks: Array.isArray(t.subtasks)
+          ? t.subtasks
+              .filter((s) => s && typeof s.title === 'string' && s.title.trim() !== '')
+              .map((s) => ({
+                id: typeof s.id === 'string' && s.id ? s.id : crypto.randomUUID(),
+                title: s.title,
+                done: s.done === true,
+              }))
+          : [],
+      };
+    }),
     entries: d.entries || [],
   };
 }
