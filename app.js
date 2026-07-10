@@ -458,6 +458,14 @@ function deleteTask(id) {
   renderAll();
 }
 
+function deleteSubtask(taskId, subtaskId) {
+  const t = taskById(taskId);
+  if (!t || !t.subtasks) return;
+  t.subtasks = t.subtasks.filter((s) => s.id !== subtaskId);
+  save();
+  renderAll();
+}
+
 function deleteClient(id) {
   const projects = data.projects.filter((p) => p.clientId === id);
   if (projects.length > 0) {
@@ -687,6 +695,23 @@ function renderTodo() {
     ui.todoFilterClient = selectedProject.clientId || '';
   }
 
+  const subtaskBlock = (t) => {
+    const subtasks = t.subtasks || [];
+    return `
+      <ul class="subtask-list">
+        ${subtasks.map((s) => `
+          <li class="subtask-item ${s.done ? 'done' : ''}">
+            <input type="checkbox" ${s.done ? 'checked' : ''} data-action-change="toggle-subtask" data-id="${t.id}" data-subtask-id="${s.id}">
+            <span class="subtask-title">${esc(s.title)}</span>
+            <button class="btn-icon danger" data-action="del-subtask" data-id="${t.id}" data-subtask-id="${s.id}" title="削除">🗑</button>
+          </li>`).join('')}
+      </ul>
+      <form class="subtask-add-form" data-action-submit="add-subtask" data-id="${t.id}">
+        <input type="text" name="title" placeholder="サブタスクを追加..." required>
+        <button class="btn-icon" type="submit" title="追加">＋</button>
+      </form>`;
+  };
+
   const taskRow = (t) => {
     if (ui.editingTask === t.id) {
       return `
@@ -710,6 +735,7 @@ function renderTodo() {
             <button class="btn btn-primary" type="submit">保存</button>
             <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
           </form>
+          ${subtaskBlock(t)}
         </li>`;
     }
     const totalMs = data.entries
@@ -748,6 +774,7 @@ function renderTodo() {
             ${repeatChip(t)}
             ${totalChip(t, totalMs)}
           </div>
+          ${subtaskBlock(t)}
         </div>
         <div class="task-actions">
           ${timerBtn}
@@ -1528,6 +1555,9 @@ document.addEventListener('click', (ev) => {
     case 'del-task':
       deleteTask(id);
       return;
+    case 'del-subtask':
+      deleteSubtask(id, el.dataset.subtaskId);
+      return;
     case 'edit-entry':
       clearEditing();
       ui.editingEntry = id;
@@ -1655,6 +1685,15 @@ document.addEventListener('change', (ev) => {
       save();
       break;
     }
+    case 'toggle-subtask': {
+      const t = taskById(el.dataset.id);
+      if (!t) return;
+      const s = (t.subtasks || []).find((x) => x.id === el.dataset.subtaskId);
+      if (!s) return;
+      s.done = el.checked;
+      save();
+      break;
+    }
     case 'todo-client-filter': {
       ui.todoFilterClient = el.value;
       const project = projectById(ui.todoFilterProject);
@@ -1732,6 +1771,7 @@ document.addEventListener('submit', (ev) => {
         estimateMinutes: parseEstimate(fd.get('estimateMinutes')),
         importance: parseImportance(fd.get('importance')),
         note: null,
+        subtasks: [],
         ...planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')),
       });
       break;
@@ -1748,6 +1788,15 @@ document.addEventListener('submit', (ev) => {
       t.note = String(fd.get('note') || '').trim() || null;
       Object.assign(t, planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')));
       clearEditing();
+      break;
+    }
+    case 'add-subtask': {
+      const title = String(fd.get('title')).trim();
+      if (!title) return;
+      const t = taskById(id);
+      if (!t) return;
+      if (!t.subtasks) t.subtasks = [];
+      t.subtasks.push({ id: uid(), title, done: false });
       break;
     }
     case 'add-entry': {
