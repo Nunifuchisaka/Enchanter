@@ -45,6 +45,15 @@ function sanitizeData(d) {
         : null,
       importance: sanitizeImportance(t.importance),
       note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
+      subtasks: Array.isArray(t.subtasks)
+        ? t.subtasks
+            .filter((s) => s && typeof s.title === 'string' && s.title.trim() !== '')
+            .map((s) => ({
+              id: typeof s.id === 'string' && s.id ? s.id : crypto.randomUUID(),
+              title: s.title,
+              done: s.done === true,
+            }))
+        : [],
     })),
     entries: d.entries || [],
   };

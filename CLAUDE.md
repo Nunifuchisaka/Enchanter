@@ -70,3 +70,7 @@ Entirely contained in `server.js` (no npm packages — talks to Google's REST AP
 - OAuth is the "Desktop app" flow: `GET /api/google/auth-url` builds the consent URL (storing a random `state` in the in-memory `pendingOAuthState`), the browser is redirected to Google, and `GET /oauth/callback` exchanges the code for tokens after checking `state` matches. `getValidAccessToken()` transparently refreshes the access token using the refresh token when it's near expiry.
 - `app.js`'s `syncEntryToGoogle()` calls `POST /api/calendar/sync-entry` whenever a time entry's `end` becomes non-null (timer stop, or manual entry add/edit) — see the "Render/mutate/save cycle" callers. This is fire-and-forget; failures are logged but never block the local save/render cycle.
 - If `data/google-credentials.json` is absent, `ui.googleStatus.configured` is `false` and the feature is inert everywhere — no code path assumes Google is configured.
+
+## Claude Code operating instructions
+
+- When plan-mode design work is delegated to a Plan (or other design-focused) subagent for this repository, launch it with `model: "fable"`.

@@ -473,6 +473,44 @@ details.done-section summary {
   margin: 2px 0;
 }
 
+.subtask-list {
+  list-style: none;
+  margin: 4px 0 2px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subtask-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.subtask-item.done .subtask-title {
+  text-decoration: line-through;
+  color: var(--text-sub);
+}
+
+.subtask-title {
+  flex: 1;
+}
+
+.subtask-add-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.subtask-add-form input[type="text"] {
+  flex: 1;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
 .estimate-input {
   display: inline-flex;
   align-items: center;

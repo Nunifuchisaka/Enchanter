@@ -83,7 +83,7 @@ http://localhost:8787 を開いてください。データは `./data` フォル
 {
   "clients": [{ "id": "...", "name": "..." }],
   "projects": [{ "id": "...", "name": "...", "customId": "...", "clientId": "...", "color": "#7c5cff" }],
-  "tasks": [{ "id": "...", "title": "...", "projectId": "...", "done": false, "createdAt": 0, "completedAt": null, "plannedStart": "2026-07-05", "plannedEnd": "2026-07-07", "importance": 3, "estimateMinutes": 120, "note": "自由記述メモ" }],
+  "tasks": [{ "id": "...", "title": "...", "projectId": "...", "done": false, "createdAt": 0, "completedAt": null, "plannedStart": "2026-07-05", "plannedEnd": "2026-07-07", "importance": 3, "estimateMinutes": 120, "note": "自由記述メモ", "subtasks": [{ "id": "...", "title": "...", "done": false }] }],
   "entries": [{ "id": "...", "taskId": "...", "start": 0, "end": null }]
 }
 ```
