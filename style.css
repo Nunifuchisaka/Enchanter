@@ -190,6 +190,10 @@ input:focus, select:focus {
   max-width: 1320px;
 }
 
+.view-kanban {
+  max-width: 1600px;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -323,6 +327,17 @@ input:focus, select:focus {
 .status-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.status-toggle.status-in-progress {
+  border-color: #d97706;
+  background: rgba(217, 119, 6, 0.12);
+  color: #d97706;
+}
+
+.status-toggle.status-in-progress::after {
+  content: '▶';
+  font-size: 8px;
 }
 
 .status-toggle.status-waiting-review {
@@ -515,10 +530,15 @@ details.done-section summary {
   padding: 4px 0;
 }
 
+.in-progress-section,
 .waiting-review-section {
   margin-top: 4px;
   padding-top: 12px;
   border-top: 1px dashed var(--border);
+}
+
+.in-progress-section h3 {
+  color: #d97706;
 }
 
 .waiting-review-section h3 {
@@ -635,6 +655,130 @@ details.done-section summary {
 .estimate .over-note {
   color: var(--danger);
   font-weight: 600;
+}
+
+/* ---------- kanban ---------- */
+
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.kanban-column {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.kanban-column.drop-target {
+  outline: 2px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.kanban-column-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.kanban-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-sub);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.kanban-cards {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 60px;
+}
+
+.kanban-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.kanban-card.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  position: relative;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.kanban-card.due-today {
+  box-shadow: inset 3px 0 0 #d97706;
+}
+
+.kanban-card.waiting-review {
+  box-shadow: inset 3px 0 0 var(--review);
+}
+
+.kanban-card.in-progress {
+  box-shadow: inset 3px 0 0 #d97706;
+}
+
+.kanban-card.done {
+  opacity: 0.6;
+}
+
+.kanban-card.done .kanban-card-title {
+  text-decoration: line-through;
+  color: var(--text-sub);
+}
+
+.kanban-card-title {
+  font-weight: 600;
+  word-break: break-word;
+  margin-bottom: 6px;
+}
+
+.kanban-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.kanban-running {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.kanban-empty {
+  color: var(--text-sub);
+  font-size: 12px;
+  text-align: center;
+  padding: 12px 0;
+}
+
+@media (max-width: 800px) {
+  .kanban-board {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---------- timeline ---------- */
@@ -757,6 +901,10 @@ details.done-section summary {
 .tl-block.plan-waiting {
   outline: 2px solid var(--review);
   outline-offset: -2px;
+}
+
+.tl-block.plan-in-progress {
+  outline: 2px solid #d97706;
 }
 
 .tl-block.plan-overdue {
@@ -916,6 +1064,11 @@ details.done-section summary {
   font-weight: 600;
 }
 
+.plan-task.in-progress,
+.gantt-col-label.in-progress {
+  color: #d97706;
+}
+
 .gantt-col-project {
   color: var(--text-sub);
   font-size: 12px;
@@ -954,6 +1107,10 @@ details.done-section summary {
 
 .gantt-bar-v.waiting-review {
   box-shadow: 0 0 0 2px var(--review);
+}
+
+.gantt-bar-v.in-progress {
+  box-shadow: 0 0 0 2px #d97706;
 }
 
 .gantt-bar-v.overdue {

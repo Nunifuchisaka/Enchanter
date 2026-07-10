@@ -42,6 +42,7 @@ const ui = {
 
 let ganttDrag = null;
 let lastGanttDragUndo = null;
+let kanbanDrag = null;
 
 function normalize(d) {
   return {
@@ -50,6 +51,19 @@ function normalize(d) {
     tasks: d.tasks || [],
     entries: d.entries || [],
   };
+}
+
+// 作業記録がある未着手タスクは、過去に計測済みなので作業中として扱う
+function promoteStartedTasks() {
+  const startedTaskIds = new Set(data.entries.map((e) => e.taskId));
+  let changed = false;
+  data.tasks.forEach((t) => {
+    if (t.status === 'todo' && startedTaskIds.has(t.id)) {
+      t.status = 'in_progress';
+      changed = true;
+    }
+  });
+  return changed;
 }
 
 async function loadFromServer() {
@@ -424,6 +438,9 @@ function nextOccurrence(t) {
 // 複数タスクの並行計測に対応(同じタスクの二重計測のみ防ぐ)
 function startTimer(taskId) {
   if (runningEntryForTask(taskId)) return;
+  const task = taskById(taskId);
+  if (!task) return;
+  if (task.status === 'todo') task.status = 'in_progress';
   data.entries.push({ id: uid(), taskId, start: Date.now(), end: null });
   save();
   renderAll();
@@ -548,16 +565,87 @@ function isDueToday(t) {
 
 function statusRowClass(t) {
   if (t.status === 'done') return 'done';
+  if (t.status === 'in_progress') return 'in-progress';
   if (t.status === 'waiting_review') return 'waiting-review';
   return '';
 }
 
-const TASK_STATUS_ORDER = ['todo', 'waiting_review', 'done'];
-const TASK_STATUS_LABELS = { todo: '未着手', waiting_review: '作業済み(確認待ち)', done: '完了' };
+// 重要度が高い順。同じ重要度なら予定日が近い順(予定なしは後ろ)、同条件なら新しい順
+function compareActiveTasks(a, b) {
+  const ai = parseImportance(a.importance);
+  const bi = parseImportance(b.importance);
+  if (ai !== bi) return bi - ai;
+  const ap = a.plannedStart || '9999-99-99';
+  const bp = b.plannedStart || '9999-99-99';
+  if (ap !== bp) return ap < bp ? -1 : 1;
+  return b.createdAt - a.createdAt;
+}
+
+// ui.todoFilter*(クライアント/プロジェクト/重要度/年月)でタスクを絞り込む。Todo/カンバン両タブで共有
+function applyTodoFilters(tasks) {
+  let result = tasks;
+  if (ui.todoFilterClient) {
+    result = result.filter((t) => {
+      const project = projectById(t.projectId);
+      return project && project.clientId === ui.todoFilterClient;
+    });
+  }
+  if (ui.todoFilterProject) {
+    result = result.filter((t) => t.projectId === ui.todoFilterProject);
+  }
+  if (ui.todoFilterImportance !== '') {
+    const importance = Number(ui.todoFilterImportance);
+    result = result.filter((t) => parseImportance(t.importance) === importance);
+  }
+  if (ui.todoFilterMonth) {
+    const monthStart = `${ui.todoFilterMonth}-01`;
+    const monthEnd = endOfMonthStr(ui.todoFilterMonth);
+    result = result.filter((t) => t.plannedStart && t.plannedEnd && t.plannedStart <= monthEnd && t.plannedEnd >= monthStart);
+  }
+  return result;
+}
+
+// Todo/カンバン両タブで共有するフィルタUI(クライアント/プロジェクト/重要度/年月)
+function todoFilterRow() {
+  return `
+    <div class="filter-row">
+      <label>クライアント:
+        <select data-action-change="todo-client-filter">${clientOptions(ui.todoFilterClient, 'すべて')}</select>
+      </label>
+      <label>プロジェクト:
+        <select data-action-change="todo-filter">${projectOptions(ui.todoFilterProject, 'すべて', ui.todoFilterClient)}</select>
+      </label>
+      <label>重要度:
+        <select data-action-change="todo-importance-filter">${importanceFilterOptions(ui.todoFilterImportance)}</select>
+      </label>
+      <label>年月:
+        <input type="month" data-action-change="todo-month-filter" value="${ui.todoFilterMonth}">
+      </label>
+    </div>`;
+}
+
+const TASK_STATUS_ORDER = ['todo', 'in_progress', 'waiting_review', 'done'];
+const TASK_STATUS_LABELS = { todo: '未着手', in_progress: '作業中', waiting_review: '作業済み(確認待ち)', done: '完了' };
 
 function nextTaskStatus(status) {
   const idx = TASK_STATUS_ORDER.indexOf(status);
   return TASK_STATUS_ORDER[(idx + 1) % TASK_STATUS_ORDER.length];
+}
+
+// ステータスを直接設定し、付随する副作用(完了時刻・計測停止・繰り返し次回生成)を適用する
+// 変更があればtrueを返す。save()/renderAll()は呼び出し側の責務
+function setTaskStatus(t, status) {
+  if (!TASK_STATUS_ORDER.includes(status) || t.status === status) return false;
+  t.status = status;
+  if (status === 'done') {
+    t.completedAt = Date.now();
+    const r = runningEntryForTask(t.id);
+    if (r) stopTimer(r.id);
+    if (t.repeat) data.tasks.push(nextOccurrence(t));
+  } else {
+    t.completedAt = null;
+  }
+  return true;
 }
 
 function projectChip(projectId) {
@@ -583,7 +671,7 @@ function totalChip(t, totalMs) {
 
 /* ----- URLハッシュ(タブ状態の保存/復元) ----- */
 
-const HASH_TABS = ['todo', 'timeline', 'gantt', 'report', 'manage'];
+const HASH_TABS = ['todo', 'kanban', 'timeline', 'gantt', 'report', 'manage'];
 const HASH_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const HASH_MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -595,7 +683,7 @@ function endOfMonthStr(monthStr) {
 // 現在のuiから「#タブ?パラメータ」形式のハッシュを作る(タブごとに意味のある値のみ)
 function buildHash() {
   const params = new URLSearchParams();
-  if (ui.tab === 'todo') {
+  if (ui.tab === 'todo' || ui.tab === 'kanban') {
     if (ui.todoFilterClient) params.set('client', ui.todoFilterClient);
     if (ui.todoFilterProject) params.set('project', ui.todoFilterProject);
     if (ui.todoFilterImportance !== '') params.set('importance', ui.todoFilterImportance);
@@ -623,7 +711,7 @@ function applyHash() {
   ui.tab = tab;
   const params = new URLSearchParams(qs || '');
   const date = params.get('date');
-  if (tab === 'todo') {
+  if (tab === 'todo' || tab === 'kanban') {
     const clientId = params.get('client') || '';
     const projectId = params.get('project') || '';
     const importance = params.get('importance');
@@ -659,8 +747,10 @@ function renderAll() {
     b.classList.toggle('active', b.dataset.tab === ui.tab);
   });
   const view = document.getElementById('view');
-  view.classList.toggle('view-wide', ui.tab === 'gantt');
+  view.classList.toggle('view-wide', ui.tab === 'gantt' || ui.tab === 'kanban');
+  view.classList.toggle('view-kanban', ui.tab === 'kanban');
   if (ui.tab === 'todo') view.innerHTML = renderTodo();
+  else if (ui.tab === 'kanban') view.innerHTML = renderKanban();
   else if (ui.tab === 'timeline') view.innerHTML = renderTimeline();
   else if (ui.tab === 'gantt') view.innerHTML = renderGantt();
   else if (ui.tab === 'report') view.innerHTML = renderReport();
@@ -780,7 +870,7 @@ function renderTodo() {
         <button type="button" class="status-toggle${statusRowClass(t) ? ' status-' + statusRowClass(t) : ''}"
           data-action="cycle-status" data-id="${t.id}"
           aria-label="ステータス: ${TASK_STATUS_LABELS[t.status]}(クリックで次の状態へ)"
-          title="クリックで状態を切り替え(未着手 → 作業済み → 完了)"></button>
+          title="クリックで状態を切り替え(未着手 → 作業中 → 作業済み → 完了)"></button>
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
           ${t.note ? `<div class="task-note">${esc(t.note)}</div>` : ''}
@@ -801,36 +891,9 @@ function renderTodo() {
       </li>`;
   };
 
-  let tasks = [...data.tasks];
-  if (ui.todoFilterClient) {
-    tasks = tasks.filter((t) => {
-      const project = projectById(t.projectId);
-      return project && project.clientId === ui.todoFilterClient;
-    });
-  }
-  if (ui.todoFilterProject) {
-    tasks = tasks.filter((t) => t.projectId === ui.todoFilterProject);
-  }
-  if (ui.todoFilterImportance !== '') {
-    const importance = Number(ui.todoFilterImportance);
-    tasks = tasks.filter((t) => parseImportance(t.importance) === importance);
-  }
-  if (ui.todoFilterMonth) {
-    const monthStart = `${ui.todoFilterMonth}-01`;
-    const monthEnd = endOfMonthStr(ui.todoFilterMonth);
-    tasks = tasks.filter((t) => t.plannedStart && t.plannedEnd && t.plannedStart <= monthEnd && t.plannedEnd >= monthStart);
-  }
-  // 重要度が高い順。同じ重要度なら予定日が近い順(予定なしは後ろ)、同条件なら新しい順
-  const compareActiveTasks = (a, b) => {
-    const ai = parseImportance(a.importance);
-    const bi = parseImportance(b.importance);
-    if (ai !== bi) return bi - ai;
-    const ap = a.plannedStart || '9999-99-99';
-    const bp = b.plannedStart || '9999-99-99';
-    if (ap !== bp) return ap < bp ? -1 : 1;
-    return b.createdAt - a.createdAt;
-  };
+  const tasks = applyTodoFilters(data.tasks);
   const active = tasks.filter((t) => t.status === 'todo').sort(compareActiveTasks);
+  const inProgress = tasks.filter((t) => t.status === 'in_progress').sort(compareActiveTasks);
   const waitingReview = tasks.filter((t) => t.status === 'waiting_review').sort(compareActiveTasks);
   const done = tasks.filter((t) => t.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
@@ -857,23 +920,15 @@ function renderTodo() {
     </div>
     <div class="card">
       <h2>📋 Todoリスト</h2>
-      <div class="filter-row">
-        <label>クライアント:
-          <select data-action-change="todo-client-filter">${clientOptions(ui.todoFilterClient, 'すべて')}</select>
-        </label>
-        <label>プロジェクト:
-          <select data-action-change="todo-filter">${projectOptions(ui.todoFilterProject, 'すべて', ui.todoFilterClient)}</select>
-        </label>
-        <label>重要度:
-          <select data-action-change="todo-importance-filter">${importanceFilterOptions(ui.todoFilterImportance)}</select>
-        </label>
-        <label>年月:
-          <input type="month" data-action-change="todo-month-filter" value="${ui.todoFilterMonth}">
-        </label>
-      </div>
+      ${todoFilterRow()}
       <ul class="task-list">
         ${active.length ? active.map(taskRow).join('') : '<li class="empty">未完了のタスクはありません</li>'}
       </ul>
+      ${inProgress.length ? `
+        <div class="in-progress-section">
+          <h3>▶ 作業中 (${inProgress.length})</h3>
+          <ul class="task-list">${inProgress.map(taskRow).join('')}</ul>
+        </div>` : ''}
       ${waitingReview.length ? `
         <div class="waiting-review-section">
           <h3>⏳ 作業済み・確認待ち (${waitingReview.length})</h3>
@@ -884,6 +939,57 @@ function renderTodo() {
           <summary>完了済み (${done.length})</summary>
           <ul class="task-list">${done.map(taskRow).join('')}</ul>
         </details>` : ''}
+    </div>`;
+}
+
+/* ----- カンバンタブ ----- */
+
+const KANBAN_DONE_LIMIT = 20;
+
+function kanbanCard(t) {
+  const subtasks = t.subtasks || [];
+  const doneCount = subtasks.filter((s) => s.done).length;
+  const running = runningEntryForTask(t.id);
+  return `
+    <li class="kanban-card ${statusRowClass(t)}${isDueToday(t) ? ' due-today' : ''}"
+      data-action-pointer="kanban-drag" data-id="${t.id}">
+      <div class="kanban-card-title">${esc(t.title)}</div>
+      <div class="kanban-card-meta">
+        ${projectChip(t.projectId)}
+        ${importanceChip(t)}
+        ${planChip(t)}
+        ${subtasks.length ? `<span class="chip">☑ ${doneCount}/${subtasks.length}</span>` : ''}
+        ${running ? '<span class="chip kanban-running">● 計測中</span>' : ''}
+      </div>
+    </li>`;
+}
+
+function renderKanban() {
+  const tasks = applyTodoFilters(data.tasks);
+  const byStatus = {
+    todo: tasks.filter((t) => t.status === 'todo').sort(compareActiveTasks),
+    in_progress: tasks.filter((t) => t.status === 'in_progress').sort(compareActiveTasks),
+    waiting_review: tasks.filter((t) => t.status === 'waiting_review').sort(compareActiveTasks),
+    done: tasks.filter((t) => t.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)),
+  };
+
+  const columns = TASK_STATUS_ORDER.map((status) => {
+    const columnTasks = byStatus[status];
+    const shown = status === 'done' ? columnTasks.slice(0, KANBAN_DONE_LIMIT) : columnTasks;
+    return `
+      <section class="kanban-column" data-status="${status}">
+        <h3 class="kanban-column-header">${TASK_STATUS_LABELS[status]}<span class="kanban-count">${columnTasks.length}</span></h3>
+        <ul class="kanban-cards">
+          ${shown.length ? shown.map(kanbanCard).join('') : '<li class="kanban-empty">タスクなし</li>'}
+        </ul>
+      </section>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <h2>🗂 カンバンボード</h2>
+      ${todoFilterRow()}
+      <div class="kanban-board">${columns}</div>
     </div>`;
 }
 
@@ -916,13 +1022,13 @@ function renderPlannedForDay(day, opts = {}) {
   let planned = data.tasks
     .filter((t) => t.plannedStart && t.plannedStart <= day && day <= t.plannedEnd);
   if (opts.untimedOnly) planned = planned.filter((t) => !hasTimeOnDay(t, day));
-  const statusRank = { todo: 0, waiting_review: 1, done: 2 };
+  const statusRank = { todo: 0, in_progress: 1, waiting_review: 2, done: 3 };
   planned = planned.sort((a, b) => statusRank[a.status] - statusRank[b.status] || b.createdAt - a.createdAt);
   if (!planned.length) return '';
   const items = planned.map((t) => `
     <span class="plan-task ${statusRowClass(t)}">
       <span class="chip-dot" style="background:${projectColor(t.projectId)}"></span>
-      ${t.status === 'done' ? '✔ ' : t.status === 'waiting_review' ? '⏳ ' : ''}${esc(t.title)}
+      ${t.status === 'done' ? '✔ ' : t.status === 'waiting_review' ? '⏳ ' : t.status === 'in_progress' ? '▶ ' : ''}${esc(t.title)}
     </span>`).join('');
   return `<div class="plan-day-row"><span class="plan-day-label">${opts.label || '📅 この日の予定:'}</span>${items}</div>`;
 }
@@ -1085,9 +1191,9 @@ function renderGanttDay() {
     const top = ((it.clipStart - dayStart) / 86400000) * 100;
     const height = ((it.clipEnd - it.clipStart) / 86400000) * 100;
     const overdue = t.status === 'todo' && t.plannedEnd < todayStr;
-    const cls = `${t.status === 'done' ? ' plan-done' : t.status === 'waiting_review' ? ' plan-waiting' : ''}${overdue ? ' plan-overdue' : ''}${draggable ? ' gantt-day-draggable' : ''}`;
+    const cls = `${t.status === 'done' ? ' plan-done' : t.status === 'waiting_review' ? ' plan-waiting' : t.status === 'in_progress' ? ' plan-in-progress' : ''}${overdue ? ' plan-overdue' : ''}${draggable ? ' gantt-day-draggable' : ''}`;
     const tip = `${t.title}${project ? ` (${project.name})` : ''}\n${fmtTime(it.clipStart)} 〜 ${fmtTime(it.clipEnd)}` +
-      `${overdue ? '\n⚠ 期限超過' : ''}${t.status === 'waiting_review' ? '\n⏳ 作業済み(確認待ち)' : ''}${t.status === 'done' ? '\n✔ 完了' : ''}`;
+      `${overdue ? '\n⚠ 期限超過' : ''}${t.status === 'in_progress' ? '\n▶ 作業中' : ''}${t.status === 'waiting_review' ? '\n⏳ 作業済み(確認待ち)' : ''}${t.status === 'done' ? '\n✔ 完了' : ''}`;
     const label = project ? `${esc(t.title)} <span class="tl-block-project">・${esc(project.name)}</span>` : esc(t.title);
     return `<div class="tl-block${cls}"
       style="top:${top}%;height:${Math.max(height, 0.4)}%;left:${4 + it.lane * 136}px;background:${projectColor(t.projectId)}"
@@ -1176,7 +1282,7 @@ function renderGanttWeek() {
       `${t.plannedStart < startStr ? ' clip-top' : ''}${t.plannedEnd > endStr ? ' clip-bottom' : ''}`;
     const totalDays = dayIdx(t.plannedEnd) - dayIdx(t.plannedStart) + 1;
     const tip = `${t.title}${c.project ? ` (${c.project.name})` : ''}\n${planLabel(t)} (${totalDays}日間)` +
-      `${overdue ? '\n⚠ 期限超過' : ''}${t.status === 'waiting_review' ? '\n⏳ 作業済み(確認待ち)' : ''}${t.status === 'done' ? '\n✔ 完了' : ''}`;
+      `${overdue ? '\n⚠ 期限超過' : ''}${t.status === 'in_progress' ? '\n▶ 作業中' : ''}${t.status === 'waiting_review' ? '\n⏳ 作業済み(確認待ち)' : ''}${t.status === 'done' ? '\n✔ 完了' : ''}`;
     colHeads += `
       <div class="gantt-col-label${statusRowClass(t) ? ' ' + statusRowClass(t) : ''}" style="grid-column:${col}" title="${esc(tip)}">
         <span class="chip-dot" style="background:${projectColor(t.projectId)}"></span>
@@ -1580,17 +1686,7 @@ document.addEventListener('click', (ev) => {
     case 'cycle-status': {
       const t = taskById(id);
       if (!t) return;
-      t.status = nextTaskStatus(t.status);
-      if (t.status === 'done') {
-        t.completedAt = Date.now();
-        // 計測中のタスクを完了したらそのタスクの計測を停止
-        const r = runningEntryForTask(t.id);
-        if (r) stopTimer(r.id);
-        // 繰り返しタスクを完了したら次回分を自動生成
-        if (t.repeat) data.tasks.push(nextOccurrence(t));
-      } else {
-        t.completedAt = null;
-      }
+      setTaskStatus(t, nextTaskStatus(t.status));
       save();
       break;
     }
@@ -1912,6 +2008,21 @@ document.addEventListener('submit', (ev) => {
 document.addEventListener('pointerdown', (ev) => {
   const el = ev.target.closest('[data-action-pointer]');
   if (!el || ev.button !== 0) return;
+  if (el.dataset.actionPointer === 'kanban-drag') {
+    if (ev.target.closest('button, a, input, select, textarea')) return;
+    ev.preventDefault();
+    kanbanDrag = {
+      el,
+      pointerId: ev.pointerId,
+      taskId: el.dataset.id,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      started: false,
+      overColumn: null,
+    };
+    el.setPointerCapture(ev.pointerId);
+    return;
+  }
   const t = taskById(el.dataset.id);
   if (!t || !t.plannedStart || !t.plannedEnd) return;
   ev.preventDefault();
@@ -1935,6 +2046,25 @@ document.addEventListener('pointerdown', (ev) => {
 });
 
 document.addEventListener('pointermove', (ev) => {
+  if (kanbanDrag && ev.pointerId === kanbanDrag.pointerId) {
+    const dx = ev.clientX - kanbanDrag.startX;
+    const dy = ev.clientY - kanbanDrag.startY;
+    if (!kanbanDrag.started && Math.hypot(dx, dy) > 4) {
+      kanbanDrag.started = true;
+      kanbanDrag.el.classList.add('dragging');
+    }
+    if (kanbanDrag.started) {
+      kanbanDrag.el.style.transform = `translate(${dx}px, ${dy}px)`;
+      const target = document.elementFromPoint(ev.clientX, ev.clientY);
+      const column = target ? target.closest('.kanban-column') : null;
+      if (column !== kanbanDrag.overColumn) {
+        if (kanbanDrag.overColumn) kanbanDrag.overColumn.classList.remove('drop-target');
+        if (column) column.classList.add('drop-target');
+        kanbanDrag.overColumn = column;
+      }
+    }
+    return;
+  }
   if (!ganttDrag || ev.pointerId !== ganttDrag.pointerId) return;
   if (ganttDrag.action === 'gantt-day-drag') {
     const deltaMin = roundToStep((ev.clientY - ganttDrag.startY) / ganttDrag.minuteHeight, 5);
@@ -1989,8 +2119,29 @@ function finishGanttDrag(ev, commit) {
   renderAll();
 }
 
-document.addEventListener('pointerup', (ev) => finishGanttDrag(ev, true));
-document.addEventListener('pointercancel', (ev) => finishGanttDrag(ev, false));
+function finishKanbanDrag(ev, commit) {
+  if (!kanbanDrag || ev.pointerId !== kanbanDrag.pointerId) return;
+  const drag = kanbanDrag;
+  kanbanDrag = null;
+  drag.el.classList.remove('dragging');
+  drag.el.style.transform = '';
+  if (drag.overColumn) drag.overColumn.classList.remove('drop-target');
+  if (drag.el.hasPointerCapture(drag.pointerId)) drag.el.releasePointerCapture(drag.pointerId);
+  if (!commit || !drag.started) return;
+  const target = document.elementFromPoint(ev.clientX, ev.clientY);
+  const column = target ? target.closest('.kanban-column') : null;
+  if (!column) return;
+  const newStatus = column.dataset.status;
+  const t = taskById(drag.taskId);
+  if (!t) return;
+  if (setTaskStatus(t, newStatus)) {
+    save();
+    renderAll();
+  }
+}
+
+document.addEventListener('pointerup', (ev) => { finishKanbanDrag(ev, true); finishGanttDrag(ev, true); });
+document.addEventListener('pointercancel', (ev) => { finishKanbanDrag(ev, false); finishGanttDrag(ev, false); });
 
 // 戻る/進むやハッシュの手入力に追従する(renderAll内のreplaceStateでは発火しない)
 window.addEventListener('hashchange', () => {
@@ -1998,7 +2149,7 @@ window.addEventListener('hashchange', () => {
   renderAll();
 });
 
-const SHORTCUT_TABS = { 1: 'todo', 2: 'timeline', 3: 'gantt', 4: 'report', 5: 'manage' };
+const SHORTCUT_TABS = { 1: 'todo', 2: 'kanban', 3: 'timeline', 4: 'gantt', 5: 'report', 6: 'manage' };
 
 function undoLastGanttDrag() {
   if (!lastGanttDragUndo) return false;
@@ -2092,6 +2243,7 @@ async function init() {
     return;
   }
   migrateFromLocalStorage();
+  if (promoteStartedTasks()) save();
   try {
     ui.googleStatus = await fetchGoogleStatus();
   } catch (e) {

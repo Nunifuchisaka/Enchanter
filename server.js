@@ -21,7 +21,7 @@ const EMPTY_DATA = { clients: [], projects: [], tasks: [], entries: [] };
 const DEFAULT_COLOR = '#7c5cff';
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const REPEAT_VALUES = new Set(['daily', 'weekly', 'monthly']);
-const TASK_STATUSES = new Set(['todo', 'waiting_review', 'done']);
+const TASK_STATUSES = new Set(['todo', 'in_progress', 'waiting_review', 'done']);
 
 function sanitizeImportance(value) {
   return Number.isInteger(value) && value >= 0 && value <= 3 ? value : 0;
