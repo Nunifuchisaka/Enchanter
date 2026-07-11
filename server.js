@@ -27,6 +27,21 @@ function sanitizeImportance(value) {
   return Number.isInteger(value) && value >= 0 && value <= 3 ? value : 0;
 }
 
+// タグはトリム済み・空要素なし・重複なしの文字列配列に強制する(表示は常にesc()経由)
+function sanitizeTags(tags) {
+  if (!Array.isArray(tags)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const tag of tags) {
+    if (typeof tag !== 'string') continue;
+    const s = tag.trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
 // status未設定の旧データ(done: booleanのみ)を新形式へ変換する後方互換マイグレーション
 function sanitizeStatus(t) {
   if (TASK_STATUSES.has(t.status)) return t.status;
@@ -59,6 +74,7 @@ function sanitizeData(d) {
           : null,
         importance: sanitizeImportance(t.importance),
         note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
+        tags: sanitizeTags(t.tags),
         subtasks: Array.isArray(t.subtasks)
           ? t.subtasks
               .filter((s) => s && typeof s.title === 'string' && s.title.trim() !== '')
@@ -82,6 +98,7 @@ function sanitizeData(d) {
             projectId: typeof f.projectId === 'string' ? f.projectId : null,
             importance: ['', '0', '1', '2', '3'].includes(f.importance) ? f.importance : '',
             month: typeof f.month === 'string' && /^\d{4}-\d{2}$/.test(f.month) ? f.month : '',
+            tag: typeof f.tag === 'string' ? f.tag.trim() : '',
           }))
       : [],
   };

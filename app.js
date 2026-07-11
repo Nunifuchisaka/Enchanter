@@ -33,6 +33,7 @@ const ui = {
   todoFilterProject: '',
   todoFilterImportance: '',
   todoFilterMonth: '',
+  todoFilterTag: '',
   activeFilterId: null,
   editingTask: null,
   editingEntry: null,
@@ -389,6 +390,43 @@ function importanceChip(t) {
   return `<span class="chip importance-${importance}">重要度 ${IMPORTANCE_LABELS[importance]}</span>`;
 }
 
+// フォームのタグ入力(カンマ/読点区切り)を、トリム済み・空要素なし・重複なしの配列へ正規化
+function parseTags(v) {
+  const seen = new Set();
+  const tags = [];
+  for (const raw of String(v || '').split(/[,、]/)) {
+    const s = raw.trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    tags.push(s);
+  }
+  return tags;
+}
+
+// 全タスクで使われているタグの一覧(五十音順)。タグはタスク側にのみ保持され、マスタは持たない
+function allTags() {
+  const set = new Set();
+  for (const t of data.tasks) {
+    for (const tag of t.tags || []) set.add(tag);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'ja'));
+}
+
+function tagChips(t) {
+  return (t.tags || []).map((tag) => `<span class="chip tag-chip">🏷 ${esc(tag)}</span>`).join('');
+}
+
+function tagFilterOptions(selected) {
+  const tags = allTags();
+  // 保存済みフィルター等で、どのタスクにも残っていないタグが選択中でも選択肢に含める
+  if (selected && !tags.includes(selected)) tags.push(selected);
+  let html = `<option value=""${selected ? '' : ' selected'}>すべて</option>`;
+  for (const tag of tags) {
+    html += `<option value="${esc(tag)}"${tag === selected ? ' selected' : ''}>${esc(tag)}</option>`;
+  }
+  return html;
+}
+
 const REPEAT_LABELS = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
 
 function repeatOptions(selected) {
@@ -432,6 +470,7 @@ function nextOccurrence(t) {
     estimateMinutes: t.estimateMinutes || null,
     importance: parseImportance(t.importance),
     note: t.note || null,
+    tags: [...(t.tags || [])],
   };
 }
 
@@ -583,7 +622,7 @@ function compareActiveTasks(a, b) {
   return b.createdAt - a.createdAt;
 }
 
-// ui.todoFilter*(クライアント/プロジェクト/重要度/年月)でタスクを絞り込む。Todo/カンバン両タブで共有
+// ui.todoFilter*(クライアント/プロジェクト/重要度/年月/タグ)でタスクを絞り込む。Todo/カンバン両タブで共有
 function applyTodoFilters(tasks) {
   let result = tasks;
   if (ui.todoFilterClient) {
@@ -604,6 +643,9 @@ function applyTodoFilters(tasks) {
     const monthEnd = endOfMonthStr(ui.todoFilterMonth);
     result = result.filter((t) => t.plannedStart && t.plannedEnd && t.plannedStart <= monthEnd && t.plannedEnd >= monthStart);
   }
+  if (ui.todoFilterTag) {
+    result = result.filter((t) => (t.tags || []).includes(ui.todoFilterTag));
+  }
   return result;
 }
 
@@ -618,8 +660,9 @@ function savedFilterOptions() {
   return html;
 }
 
-// Todo/カンバン両タブで共有するフィルタUI(クライアント/プロジェクト/重要度/年月+保存済みフィルター)
+// Todo/カンバン両タブで共有するフィルタUI(クライアント/プロジェクト/重要度/年月/タグ+保存済みフィルター)
 function todoFilterRow() {
+  const hasTags = allTags().length > 0 || ui.todoFilterTag;
   return `
     <div class="filter-row">
       <label>保存済み:
@@ -637,6 +680,9 @@ function todoFilterRow() {
       <label>年月:
         <input type="month" data-action-change="todo-month-filter" value="${ui.todoFilterMonth}">
       </label>
+      ${hasTags ? `<label>タグ:
+        <select data-action-change="todo-tag-filter">${tagFilterOptions(ui.todoFilterTag)}</select>
+      </label>` : ''}
       <form class="save-filter-form" data-action-submit="save-filter">
         <input type="text" name="name" placeholder="現在の条件を名前で保存..." maxlength="40" required>
         <button class="btn" type="submit" title="現在の絞り込み条件を保存">💾 保存</button>
@@ -709,6 +755,7 @@ function buildHash() {
     if (ui.todoFilterProject) params.set('project', ui.todoFilterProject);
     if (ui.todoFilterImportance !== '') params.set('importance', ui.todoFilterImportance);
     if (ui.todoFilterMonth) params.set('month', ui.todoFilterMonth);
+    if (ui.todoFilterTag) params.set('tag', ui.todoFilterTag);
     if (ui.activeFilterId) params.set('filter', ui.activeFilterId);
   } else if (ui.tab === 'timeline') {
     params.set('date', ui.timelineDate);
@@ -742,6 +789,8 @@ function applyHash() {
     ui.todoFilterProject = projectById(projectId) ? projectId : '';
     ui.todoFilterImportance = ['0', '1', '2', '3'].includes(importance) ? importance : '';
     ui.todoFilterMonth = HASH_MONTH_RE.test(month) ? month : '';
+    const tag = params.get('tag') || '';
+    ui.todoFilterTag = data.tasks.some((t) => (t.tags || []).includes(tag)) ? tag : '';
     const filterId = params.get('filter');
     ui.activeFilterId = filterId && data.filters.some((f) => f.id === filterId) ? filterId : null;
     const project = projectById(ui.todoFilterProject);
@@ -859,6 +908,7 @@ function renderTodo() {
             <span class="estimate-input">見積
               <input type="number" name="estimateMinutes" min="0" value="${t.estimateMinutes || ''}" placeholder="--">分
             </span>
+            <input type="text" name="tags" value="${esc((t.tags || []).join(', '))}" placeholder="タグ(カンマ区切り)" autocomplete="off">
             <textarea name="note" rows="2" placeholder="メモ(任意)">${esc(t.note || '')}</textarea>
             <button class="btn btn-primary" type="submit">保存</button>
             <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
@@ -903,6 +953,7 @@ function renderTodo() {
             ${importanceChip(t)}
             ${planChip(t)}
             ${repeatChip(t)}
+            ${tagChips(t)}
             ${totalChip(t, totalMs)}
           </div>
           ${subtaskBlock(t)}
@@ -939,6 +990,7 @@ function renderTodo() {
         <span class="estimate-input">見積
           <input type="number" name="estimateMinutes" min="0" placeholder="--">分
         </span>
+        <input type="text" name="tags" placeholder="タグ(カンマ区切り)" autocomplete="off">
         <button class="btn btn-primary" type="submit">追加</button>
       </form>
     </div>
@@ -982,6 +1034,7 @@ function kanbanCard(t) {
         ${projectChip(t.projectId)}
         ${importanceChip(t)}
         ${planChip(t)}
+        ${tagChips(t)}
         ${subtasks.length ? `<span class="chip">☑ ${doneCount}/${subtasks.length}</span>` : ''}
         ${running ? '<span class="chip kanban-running">● 計測中</span>' : ''}
       </div>
@@ -1559,6 +1612,52 @@ function renderProjectBreakdownChart(tree, grandTotal) {
     </div>`;
 }
 
+// 集計タブ: タグ別内訳バーチャート。複数タグを持つタスクの時間は各タグに重複計上されるため、
+// 割合の合計は100%を超えることがある。タグの付いていない時間は「タグなし」に計上する
+function renderTagBreakdownChart(fromStr, toStr, grandTotal) {
+  const now = Date.now();
+  const rangeStart = fromDateStr(fromStr).getTime();
+  const rangeEnd = fromDateStr(toStr).getTime() + 86400000;
+
+  // tag → { ms, taskIds }(''は「タグなし」)
+  const byTag = new Map();
+  for (const e of data.entries) {
+    const effEnd = e.end === null ? now : e.end;
+    const overlap = Math.min(effEnd, rangeEnd) - Math.max(e.start, rangeStart);
+    if (overlap <= 0) continue;
+    const task = taskById(e.taskId);
+    const tags = task && task.tags && task.tags.length ? task.tags : [''];
+    for (const tag of tags) {
+      if (!byTag.has(tag)) byTag.set(tag, { ms: 0, taskIds: new Set() });
+      const node = byTag.get(tag);
+      node.ms += overlap;
+      node.taskIds.add(e.taskId);
+    }
+  }
+  // タグ付きの時間がひとつも無ければチャート自体を出さない
+  if (![...byTag.keys()].some((tag) => tag !== '')) return '';
+
+  const rows = [...byTag.entries()].sort((a, b) => b[1].ms - a[1].ms);
+  const maxMs = Math.max(1, ...rows.map(([, node]) => node.ms));
+  const bars = rows.map(([tag, node]) => {
+    const label = tag ? `🏷 ${tag}` : 'タグなし';
+    const color = tag ? 'var(--accent)' : 'var(--text-sub)';
+    const pct = grandTotal ? Math.round((node.ms / grandTotal) * 100) : 0;
+    const widthPct = Math.max((node.ms / maxMs) * 100, 2);
+    return `<div class="chart-bar-row">
+      <span class="chart-bar-label" title="${esc(label)}">${esc(label)}</span>
+      <span class="chart-bar-track"><span class="chart-bar-fill" style="width:${widthPct}%;background:${color}"></span></span>
+      <span class="chart-bar-value">${fmtDur(node.ms)}<small>(${pct}%・${node.taskIds.size}タスク)</small></span>
+    </div>`;
+  }).join('');
+  return `
+    <div class="chart-block">
+      <h3 class="chart-title">🏷 タグ別の内訳</h3>
+      <div class="chart-bars">${bars}</div>
+      <p class="chart-note">※ 複数のタグが付いたタスクの時間は各タグに重複して計上されます</p>
+    </div>`;
+}
+
 function renderReport() {
   const tree = aggregate(ui.aggFrom, ui.aggTo);
   let grandTotal = 0;
@@ -1618,6 +1717,7 @@ function renderReport() {
       ${rows.length ? `
         ${renderTrendChart(ui.aggFrom, ui.aggTo)}
         ${renderProjectBreakdownChart(tree, grandTotal)}
+        ${renderTagBreakdownChart(ui.aggFrom, ui.aggTo, grandTotal)}
         <table class="report-table">
           <thead><tr><th>クライアント / プロジェクト / タスク</th><th class="num">時間</th><th class="num">割合</th></tr></thead>
           <tbody>${rows.join('')}</tbody>
@@ -1955,6 +2055,10 @@ document.addEventListener('change', (ev) => {
       ui.todoFilterMonth = HASH_MONTH_RE.test(el.value) ? el.value : '';
       ui.activeFilterId = null;
       break;
+    case 'todo-tag-filter':
+      ui.todoFilterTag = el.value;
+      ui.activeFilterId = null;
+      break;
     case 'apply-saved-filter': {
       const f = el.value ? data.filters.find((x) => x.id === el.value) : null;
       if (el.value && !f) return; // 削除済みなどで見つからない場合は何もしない
@@ -1962,6 +2066,7 @@ document.addEventListener('change', (ev) => {
       ui.todoFilterProject = f ? (f.projectId || '') : '';
       ui.todoFilterImportance = f ? f.importance : '';
       ui.todoFilterMonth = f ? f.month : '';
+      ui.todoFilterTag = f ? (f.tag || '') : '';
       ui.activeFilterId = f ? f.id : null;
       break;
     }
@@ -2021,6 +2126,7 @@ document.addEventListener('submit', (ev) => {
         estimateMinutes: parseEstimate(fd.get('estimateMinutes')),
         importance: parseImportance(fd.get('importance')),
         note: null,
+        tags: parseTags(fd.get('tags')),
         subtasks: [],
         ...planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')),
       });
@@ -2036,6 +2142,7 @@ document.addEventListener('submit', (ev) => {
       t.estimateMinutes = parseEstimate(fd.get('estimateMinutes'));
       t.importance = parseImportance(fd.get('importance'));
       t.note = String(fd.get('note') || '').trim() || null;
+      t.tags = parseTags(fd.get('tags'));
       Object.assign(t, planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')));
       clearEditing();
       break;
@@ -2048,6 +2155,7 @@ document.addEventListener('submit', (ev) => {
         projectId: ui.todoFilterProject || null,
         importance: ui.todoFilterImportance || '',
         month: ui.todoFilterMonth || '',
+        tag: ui.todoFilterTag || '',
       };
       const existing = data.filters.find((f) => f.name === name);
       if (existing) {

@@ -448,6 +448,11 @@ input:focus, select:focus {
   font-weight: 700;
 }
 
+.chip.tag-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .plan-inputs {
   display: inline-flex;
   align-items: center;
@@ -1304,6 +1309,12 @@ details.done-section summary {
 
 .chart-bar-value small {
   margin-left: 4px;
+}
+
+.chart-note {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-sub);
 }
 
 @media (max-width: 600px) {
