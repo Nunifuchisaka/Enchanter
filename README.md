@@ -84,10 +84,11 @@ http://localhost:8787 を開いてください。データは `./data` フォル
 ```json
 {
   "clients": [{ "id": "...", "name": "..." }],
+  "categories": [{ "id": "...", "name": "開発" }],
   "projects": [{ "id": "...", "name": "...", "customId": "...", "clientId": "...", "color": "#7c5cff" }],
-  "tasks": [{ "id": "...", "title": "...", "projectId": "...", "status": "todo", "createdAt": 0, "completedAt": null, "plannedStart": "2026-07-05", "plannedEnd": "2026-07-07", "importance": 3, "estimateMinutes": 120, "note": "自由記述メモ", "tags": ["デザイン", "急ぎ"], "subtasks": [{ "id": "...", "title": "...", "done": false }] }],
+  "tasks": [{ "id": "...", "title": "...", "projectId": "...", "categoryId": "...", "status": "todo", "createdAt": 0, "completedAt": null, "plannedStart": "2026-07-05", "plannedEnd": "2026-07-07", "importance": 3, "estimateMinutes": 120, "note": "自由記述メモ", "tags": ["デザイン", "急ぎ"], "subtasks": [{ "id": "...", "title": "...", "done": false }] }],
   "entries": [{ "id": "...", "taskId": "...", "start": 0, "end": null }],
-  "filters": [{ "id": "...", "name": "今週の高重要度", "clientId": null, "projectId": "...", "importance": "3", "month": "", "tag": "" }]
+  "filters": [{ "id": "...", "name": "今週の高重要度", "clientId": null, "projectId": "...", "categoryId": null, "importance": "3", "month": "", "tag": "" }]
 }
 ```
 
@@ -95,7 +96,9 @@ http://localhost:8787 を開いてください。データは `./data` フォル
 
 `tags` はタスクに付ける自由入力のラベル(文字列配列)です。タグのマスタは持たず、全タスクの`tags`から使用中の一覧を導出します。
 
-`filters` はTodo/カンバンタブの絞り込み条件を名前を付けて保存したものです。`clientId`/`projectId`は対象なしを`null`で表し、`importance`は`""`(すべて)/`"0"`〜`"3"`、`month`は`"YYYY-MM"`または`""`(指定なし)、`tag`はタグ名または`""`(指定なし)です。
+`categories` は「管理」タブで予め作成するカテゴリのマスタです。各タスクは`categoryId`でひとつのカテゴリを参照できます(未設定は`null`)。カテゴリを削除すると、参照していたタスクの`categoryId`は`null`(カテゴリなし)に戻ります。
+
+`filters` はTodo/カンバンタブの絞り込み条件を名前を付けて保存したものです。`clientId`/`projectId`/`categoryId`は対象なしを`null`で表し、`importance`は`""`(すべて)/`"0"`〜`"3"`、`month`は`"YYYY-MM"`または`""`(指定なし)、`tag`はタグ名または`""`(指定なし)です。
 
 `entries` の `end: null` は計測中を表します。
 

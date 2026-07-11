@@ -18,7 +18,7 @@ const PALETTE = [
 
 /* ---------- state ---------- */
 
-let data = { clients: [], projects: [], tasks: [], entries: [], filters: [] };
+let data = { clients: [], categories: [], projects: [], tasks: [], entries: [], filters: [] };
 
 const ui = {
   tab: 'todo',
@@ -34,11 +34,13 @@ const ui = {
   todoFilterImportance: '',
   todoFilterMonth: '',
   todoFilterTag: '',
+  todoFilterCategory: '',
   activeFilterId: null,
   editingTask: null,
   editingEntry: null,
   editingClient: null,
   editingProject: null,
+  editingCategory: null,
   googleStatus: { configured: false, connected: false },
 };
 
@@ -49,6 +51,7 @@ let kanbanDrag = null;
 function normalize(d) {
   return {
     clients: d.clients || [],
+    categories: d.categories || [],
     projects: d.projects || [],
     tasks: d.tasks || [],
     entries: d.entries || [],
@@ -186,6 +189,10 @@ function uid() {
 
 function clientById(id) {
   return data.clients.find((c) => c.id === id) || null;
+}
+
+function categoryById(id) {
+  return data.categories.find((c) => c.id === id) || null;
 }
 
 function projectById(id) {
@@ -459,6 +466,7 @@ function nextOccurrence(t) {
     id: uid(),
     title: t.title,
     projectId: t.projectId,
+    categoryId: t.categoryId || null,
     status: 'todo',
     createdAt: Date.now(),
     completedAt: null,
@@ -537,6 +545,20 @@ function deleteClient(id) {
   renderAll();
 }
 
+function deleteCategory(id) {
+  const tasks = data.tasks.filter((t) => t.categoryId === id);
+  if (tasks.length > 0) {
+    if (!confirm(`このカテゴリには ${tasks.length} 件のタスクがあります。タスクは「カテゴリなし」になります。削除しますか?`)) return;
+    tasks.forEach((t) => { t.categoryId = null; });
+  } else if (!confirm('このカテゴリを削除します。よろしいですか?')) {
+    return;
+  }
+  data.categories = data.categories.filter((c) => c.id !== id);
+  if (ui.todoFilterCategory === id) ui.todoFilterCategory = '';
+  save();
+  renderAll();
+}
+
 function deleteProject(id) {
   const tasks = data.tasks.filter((t) => t.projectId === id);
   if (tasks.length > 0) {
@@ -568,6 +590,22 @@ function clientOptions(selectedId, includeEmptyLabel) {
     html += `<option value="${c.id}"${sel}>${esc(c.name)}</option>`;
   }
   return html;
+}
+
+function categoryOptions(selectedId, includeEmptyLabel) {
+  let html = `<option value="">${includeEmptyLabel || 'カテゴリなし'}</option>`;
+  const sorted = [...data.categories].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  for (const c of sorted) {
+    const sel = c.id === selectedId ? ' selected' : '';
+    html += `<option value="${esc(c.id)}"${sel}>${esc(c.name)}</option>`;
+  }
+  return html;
+}
+
+function categoryChip(t) {
+  const c = categoryById(t.categoryId);
+  if (!c) return '';
+  return `<span class="chip category-chip">📂 ${esc(c.name)}</span>`;
 }
 
 function projectOptions(selectedId, includeEmptyLabel, clientId = '') {
@@ -646,6 +684,9 @@ function applyTodoFilters(tasks) {
   if (ui.todoFilterTag) {
     result = result.filter((t) => (t.tags || []).includes(ui.todoFilterTag));
   }
+  if (ui.todoFilterCategory) {
+    result = result.filter((t) => t.categoryId === ui.todoFilterCategory);
+  }
   return result;
 }
 
@@ -663,6 +704,7 @@ function savedFilterOptions() {
 // Todo/カンバン両タブで共有するフィルタUI(クライアント/プロジェクト/重要度/年月/タグ+保存済みフィルター)
 function todoFilterRow() {
   const hasTags = allTags().length > 0 || ui.todoFilterTag;
+  const hasCategories = data.categories.length > 0 || ui.todoFilterCategory;
   return `
     <div class="filter-row">
       <label>保存済み:
@@ -674,6 +716,9 @@ function todoFilterRow() {
       <label>プロジェクト:
         <select data-action-change="todo-filter">${projectOptions(ui.todoFilterProject, 'すべて', ui.todoFilterClient)}</select>
       </label>
+      ${hasCategories ? `<label>カテゴリ:
+        <select data-action-change="todo-category-filter">${categoryOptions(ui.todoFilterCategory, 'すべて')}</select>
+      </label>` : ''}
       <label>重要度:
         <select data-action-change="todo-importance-filter">${importanceFilterOptions(ui.todoFilterImportance)}</select>
       </label>
@@ -756,6 +801,7 @@ function buildHash() {
     if (ui.todoFilterImportance !== '') params.set('importance', ui.todoFilterImportance);
     if (ui.todoFilterMonth) params.set('month', ui.todoFilterMonth);
     if (ui.todoFilterTag) params.set('tag', ui.todoFilterTag);
+    if (ui.todoFilterCategory) params.set('category', ui.todoFilterCategory);
     if (ui.activeFilterId) params.set('filter', ui.activeFilterId);
   } else if (ui.tab === 'timeline') {
     params.set('date', ui.timelineDate);
@@ -791,6 +837,8 @@ function applyHash() {
     ui.todoFilterMonth = HASH_MONTH_RE.test(month) ? month : '';
     const tag = params.get('tag') || '';
     ui.todoFilterTag = data.tasks.some((t) => (t.tags || []).includes(tag)) ? tag : '';
+    const categoryId = params.get('category') || '';
+    ui.todoFilterCategory = categoryById(categoryId) ? categoryId : '';
     const filterId = params.get('filter');
     ui.activeFilterId = filterId && data.filters.some((f) => f.id === filterId) ? filterId : null;
     const project = projectById(ui.todoFilterProject);
@@ -896,6 +944,7 @@ function renderTodo() {
           <form class="edit-form" data-action-submit="save-task" data-id="${t.id}">
             <input type="text" name="title" value="${esc(t.title)}" required>
             <select name="projectId">${projectOptions(t.projectId)}</select>
+            ${data.categories.length ? `<select name="categoryId">${categoryOptions(t.categoryId)}</select>` : ''}
             <span class="plan-inputs">予定
               <input type="date" name="plannedStart" value="${t.plannedStart || ''}">
               ${timeSelect('plannedStartTime', t.plannedStartTime || '')}
@@ -950,6 +999,7 @@ function renderTodo() {
           ${t.note ? `<div class="task-note">${esc(t.note)}</div>` : ''}
           <div class="task-meta">
             ${projectChip(t.projectId)}
+            ${categoryChip(t)}
             ${importanceChip(t)}
             ${planChip(t)}
             ${repeatChip(t)}
@@ -978,6 +1028,7 @@ function renderTodo() {
       <form class="add-form" data-action-submit="add-task">
         <input type="text" name="title" placeholder="タスク名を入力..." required autocomplete="off">
         <select name="projectId">${projectOptions(ui.todoFilterProject || '', undefined, ui.todoFilterClient)}</select>
+        ${data.categories.length ? `<select name="categoryId">${categoryOptions(ui.todoFilterCategory || '')}</select>` : ''}
         <span class="plan-inputs">予定
           <input type="date" name="plannedStart">
           ${timeSelect('plannedStartTime', '')}
@@ -1032,6 +1083,7 @@ function kanbanCard(t) {
       <div class="kanban-card-title">${esc(t.title)}</div>
       <div class="kanban-card-meta">
         ${projectChip(t.projectId)}
+        ${categoryChip(t)}
         ${importanceChip(t)}
         ${planChip(t)}
         ${tagChips(t)}
@@ -1478,7 +1530,7 @@ function importBackup(file) {
     try {
       const parsed = JSON.parse(String(reader.result));
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid shape');
-      for (const key of ['clients', 'projects', 'tasks', 'entries']) {
+      for (const key of ['clients', 'categories', 'projects', 'tasks', 'entries', 'filters']) {
         if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error('invalid shape');
       }
       const next = normalize(parsed);
@@ -1612,6 +1664,50 @@ function renderProjectBreakdownChart(tree, grandTotal) {
     </div>`;
 }
 
+// 集計タブ: カテゴリ別内訳バーチャート。タスクのカテゴリはひとつなので重複計上はない。
+// カテゴリの付いていない時間は「カテゴリなし」に計上する
+function renderCategoryBreakdownChart(fromStr, toStr, grandTotal) {
+  const now = Date.now();
+  const rangeStart = fromDateStr(fromStr).getTime();
+  const rangeEnd = fromDateStr(toStr).getTime() + 86400000;
+
+  // categoryId → { ms, taskIds }(''は「カテゴリなし」)
+  const byCategory = new Map();
+  for (const e of data.entries) {
+    const effEnd = e.end === null ? now : e.end;
+    const overlap = Math.min(effEnd, rangeEnd) - Math.max(e.start, rangeStart);
+    if (overlap <= 0) continue;
+    const task = taskById(e.taskId);
+    const categoryId = task && categoryById(task.categoryId) ? task.categoryId : '';
+    if (!byCategory.has(categoryId)) byCategory.set(categoryId, { ms: 0, taskIds: new Set() });
+    const node = byCategory.get(categoryId);
+    node.ms += overlap;
+    node.taskIds.add(e.taskId);
+  }
+  // カテゴリ付きの時間がひとつも無ければチャート自体を出さない
+  if (![...byCategory.keys()].some((categoryId) => categoryId !== '')) return '';
+
+  const rows = [...byCategory.entries()].sort((a, b) => b[1].ms - a[1].ms);
+  const maxMs = Math.max(1, ...rows.map(([, node]) => node.ms));
+  const bars = rows.map(([categoryId, node]) => {
+    const category = categoryById(categoryId);
+    const label = category ? `📂 ${category.name}` : 'カテゴリなし';
+    const color = category ? 'var(--review)' : 'var(--text-sub)';
+    const pct = grandTotal ? Math.round((node.ms / grandTotal) * 100) : 0;
+    const widthPct = Math.max((node.ms / maxMs) * 100, 2);
+    return `<div class="chart-bar-row">
+      <span class="chart-bar-label" title="${esc(label)}">${esc(label)}</span>
+      <span class="chart-bar-track"><span class="chart-bar-fill" style="width:${widthPct}%;background:${color}"></span></span>
+      <span class="chart-bar-value">${fmtDur(node.ms)}<small>(${pct}%・${node.taskIds.size}タスク)</small></span>
+    </div>`;
+  }).join('');
+  return `
+    <div class="chart-block">
+      <h3 class="chart-title">📂 カテゴリ別の内訳</h3>
+      <div class="chart-bars">${bars}</div>
+    </div>`;
+}
+
 // 集計タブ: タグ別内訳バーチャート。複数タグを持つタスクの時間は各タグに重複計上されるため、
 // 割合の合計は100%を超えることがある。タグの付いていない時間は「タグなし」に計上する
 function renderTagBreakdownChart(fromStr, toStr, grandTotal) {
@@ -1717,6 +1813,7 @@ function renderReport() {
       ${rows.length ? `
         ${renderTrendChart(ui.aggFrom, ui.aggTo)}
         ${renderProjectBreakdownChart(tree, grandTotal)}
+        ${renderCategoryBreakdownChart(ui.aggFrom, ui.aggTo, grandTotal)}
         ${renderTagBreakdownChart(ui.aggFrom, ui.aggTo, grandTotal)}
         <table class="report-table">
           <thead><tr><th>クライアント / プロジェクト / タスク</th><th class="num">時間</th><th class="num">割合</th></tr></thead>
@@ -1746,6 +1843,27 @@ function renderManage() {
         <span class="sub">${count} プロジェクト</span>
         <button class="btn-icon" data-action="edit-client" data-id="${c.id}" title="編集">✎</button>
         <button class="btn-icon danger" data-action="del-client" data-id="${c.id}" title="削除">🗑</button>
+      </li>`;
+  };
+
+  const categoryRow = (c) => {
+    if (ui.editingCategory === c.id) {
+      return `
+        <li class="manage-item">
+          <form class="edit-form" data-action-submit="save-category" data-id="${esc(c.id)}">
+            <input type="text" name="name" value="${esc(c.name)}" required>
+            <button class="btn btn-primary" type="submit">保存</button>
+            <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
+          </form>
+        </li>`;
+    }
+    const count = data.tasks.filter((t) => t.categoryId === c.id).length;
+    return `
+      <li class="manage-item">
+        <span class="name">${esc(c.name)}</span>
+        <span class="sub">${count} タスク</span>
+        <button class="btn-icon" data-action="edit-category" data-id="${esc(c.id)}" title="編集">✎</button>
+        <button class="btn-icon danger" data-action="del-category" data-id="${esc(c.id)}" title="削除">🗑</button>
       </li>`;
   };
 
@@ -1809,7 +1927,7 @@ function renderManage() {
   const backupCard = () => `
     <div class="card">
       <h2>💾 バックアップ</h2>
-      <p class="backup-note">全データ(クライアント・プロジェクト・タスク・作業記録)をJSONで書き出し/読み込みできます。インポートは現在のデータを全て置き換えます。</p>
+      <p class="backup-note">全データ(クライアント・プロジェクト・カテゴリ・タスク・作業記録)をJSONで書き出し/読み込みできます。インポートは現在のデータを全て置き換えます。</p>
       <div class="backup-actions">
         <button class="btn" data-action="export-backup">⬇ エクスポート</button>
         <label class="btn file-btn">⬆ インポート<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
@@ -1850,6 +1968,16 @@ function renderManage() {
           ${data.projects.length ? data.projects.map(projectRow).join('') : '<li class="empty">プロジェクトがありません</li>'}
         </ul>
       </div>
+      <div class="card">
+        <h2>📂 カテゴリ</h2>
+        <form class="add-form" data-action-submit="add-category" style="margin-bottom:12px">
+          <input type="text" name="name" placeholder="カテゴリ名..." required autocomplete="off">
+          <button class="btn btn-primary" type="submit">追加</button>
+        </form>
+        <ul class="manage-list">
+          ${data.categories.length ? data.categories.map(categoryRow).join('') : '<li class="empty">カテゴリがありません</li>'}
+        </ul>
+      </div>
       ${googleCard()}
       ${backupCard()}
       ${shortcutCard()}
@@ -1863,6 +1991,7 @@ function clearEditing() {
   ui.editingEntry = null;
   ui.editingClient = null;
   ui.editingProject = null;
+  ui.editingCategory = null;
 }
 
 document.addEventListener('click', (ev) => {
@@ -1931,6 +2060,13 @@ document.addEventListener('click', (ev) => {
       break;
     case 'del-project':
       deleteProject(id);
+      return;
+    case 'edit-category':
+      clearEditing();
+      ui.editingCategory = id;
+      break;
+    case 'del-category':
+      deleteCategory(id);
       return;
     case 'cancel-edit':
       clearEditing();
@@ -2059,6 +2195,10 @@ document.addEventListener('change', (ev) => {
       ui.todoFilterTag = el.value;
       ui.activeFilterId = null;
       break;
+    case 'todo-category-filter':
+      ui.todoFilterCategory = el.value;
+      ui.activeFilterId = null;
+      break;
     case 'apply-saved-filter': {
       const f = el.value ? data.filters.find((x) => x.id === el.value) : null;
       if (el.value && !f) return; // 削除済みなどで見つからない場合は何もしない
@@ -2067,6 +2207,7 @@ document.addEventListener('change', (ev) => {
       ui.todoFilterImportance = f ? f.importance : '';
       ui.todoFilterMonth = f ? f.month : '';
       ui.todoFilterTag = f ? (f.tag || '') : '';
+      ui.todoFilterCategory = f ? (f.categoryId || '') : '';
       ui.activeFilterId = f ? f.id : null;
       break;
     }
@@ -2119,6 +2260,7 @@ document.addEventListener('submit', (ev) => {
         id: uid(),
         title,
         projectId: fd.get('projectId') || null,
+        categoryId: fd.get('categoryId') || null,
         status: 'todo',
         createdAt: Date.now(),
         completedAt: null,
@@ -2138,6 +2280,7 @@ document.addEventListener('submit', (ev) => {
       const title = String(fd.get('title')).trim();
       if (title) t.title = title;
       t.projectId = fd.get('projectId') || null;
+      t.categoryId = fd.get('categoryId') || null;
       t.repeat = fd.get('repeat') || null;
       t.estimateMinutes = parseEstimate(fd.get('estimateMinutes'));
       t.importance = parseImportance(fd.get('importance'));
@@ -2153,6 +2296,7 @@ document.addEventListener('submit', (ev) => {
       const snapshot = {
         clientId: ui.todoFilterClient || null,
         projectId: ui.todoFilterProject || null,
+        categoryId: ui.todoFilterCategory || null,
         importance: ui.todoFilterImportance || '',
         month: ui.todoFilterMonth || '',
         tag: ui.todoFilterTag || '',
@@ -2223,6 +2367,20 @@ document.addEventListener('submit', (ev) => {
     }
     case 'save-client': {
       const c = clientById(id);
+      if (!c) return;
+      const name = String(fd.get('name')).trim();
+      if (name) c.name = name;
+      clearEditing();
+      break;
+    }
+    case 'add-category': {
+      const name = String(fd.get('name')).trim();
+      if (!name) return;
+      data.categories.push({ id: uid(), name });
+      break;
+    }
+    case 'save-category': {
+      const c = categoryById(id);
       if (!c) return;
       const name = String(fd.get('name')).trim();
       if (name) c.name = name;
@@ -2432,7 +2590,7 @@ document.addEventListener('keydown', (ev) => {
     return;
   }
   if (ev.key === 'Escape') {
-    if (ui.editingTask || ui.editingEntry || ui.editingClient || ui.editingProject) {
+    if (ui.editingTask || ui.editingEntry || ui.editingClient || ui.editingProject || ui.editingCategory) {
       clearEditing();
       renderAll();
     }

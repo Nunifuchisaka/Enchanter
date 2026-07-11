@@ -453,6 +453,11 @@ input:focus, select:focus {
   color: var(--accent);
 }
 
+.chip.category-chip {
+  background: var(--review-soft);
+  color: var(--review);
+}
+
 .plan-inputs {
   display: inline-flex;
   align-items: center;

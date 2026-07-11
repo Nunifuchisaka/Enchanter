@@ -54,6 +54,15 @@ function sanitizeStatus(t) {
 function sanitizeData(d) {
   return {
     clients: d.clients || [],
+    // カテゴリマスタ。nameが欠落/空の要素は除外する(名前の表示は常にesc()経由)
+    categories: Array.isArray(d.categories)
+      ? d.categories
+          .filter((c) => c && typeof c.name === 'string' && c.name.trim() !== '')
+          .map((c) => ({
+            id: typeof c.id === 'string' && c.id ? c.id : crypto.randomUUID(),
+            name: c.name,
+          }))
+      : [],
     projects: (d.projects || []).map((p) => ({
       ...p,
       color: COLOR_RE.test(p.color) ? p.color : DEFAULT_COLOR,
@@ -73,6 +82,7 @@ function sanitizeData(d) {
           ? Math.round(t.estimateMinutes)
           : null,
         importance: sanitizeImportance(t.importance),
+        categoryId: typeof t.categoryId === 'string' && t.categoryId ? t.categoryId : null,
         note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
         tags: sanitizeTags(t.tags),
         subtasks: Array.isArray(t.subtasks)
@@ -96,6 +106,7 @@ function sanitizeData(d) {
             name: f.name,
             clientId: typeof f.clientId === 'string' ? f.clientId : null,
             projectId: typeof f.projectId === 'string' ? f.projectId : null,
+            categoryId: typeof f.categoryId === 'string' ? f.categoryId : null,
             importance: ['', '0', '1', '2', '3'].includes(f.importance) ? f.importance : '',
             month: typeof f.month === 'string' && /^\d{4}-\d{2}$/.test(f.month) ? f.month : '',
             tag: typeof f.tag === 'string' ? f.tag.trim() : '',
