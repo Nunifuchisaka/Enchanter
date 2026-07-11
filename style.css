@@ -280,6 +280,16 @@ input:focus, select:focus {
   color: var(--text-sub);
 }
 
+.save-filter-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.save-filter-form input[type="text"] {
+  width: 180px;
+}
+
 .task-list {
   list-style: none;
 }

@@ -18,7 +18,7 @@ const PALETTE = [
 
 /* ---------- state ---------- */
 
-let data = { clients: [], projects: [], tasks: [], entries: [] };
+let data = { clients: [], projects: [], tasks: [], entries: [], filters: [] };
 
 const ui = {
   tab: 'todo',
@@ -33,6 +33,7 @@ const ui = {
   todoFilterProject: '',
   todoFilterImportance: '',
   todoFilterMonth: '',
+  activeFilterId: null,
   editingTask: null,
   editingEntry: null,
   editingClient: null,
@@ -50,6 +51,7 @@ function normalize(d) {
     projects: d.projects || [],
     tasks: d.tasks || [],
     entries: d.entries || [],
+    filters: d.filters || [],
   };
 }
 
@@ -605,10 +607,24 @@ function applyTodoFilters(tasks) {
   return result;
 }
 
-// Todo/カンバン両タブで共有するフィルタUI(クライアント/プロジェクト/重要度/年月)
+// 保存済みフィルターのselect用option(先頭は「フィルターなし」固定)
+function savedFilterOptions() {
+  let html = `<option value=""${ui.activeFilterId ? '' : ' selected'}>-- フィルターなし --</option>`;
+  const sorted = [...data.filters].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  for (const f of sorted) {
+    const sel = f.id === ui.activeFilterId ? ' selected' : '';
+    html += `<option value="${esc(f.id)}"${sel}>${esc(f.name)}</option>`;
+  }
+  return html;
+}
+
+// Todo/カンバン両タブで共有するフィルタUI(クライアント/プロジェクト/重要度/年月+保存済みフィルター)
 function todoFilterRow() {
   return `
     <div class="filter-row">
+      <label>保存済み:
+        <select data-action-change="apply-saved-filter">${savedFilterOptions()}</select>
+      </label>
       <label>クライアント:
         <select data-action-change="todo-client-filter">${clientOptions(ui.todoFilterClient, 'すべて')}</select>
       </label>
@@ -621,6 +637,11 @@ function todoFilterRow() {
       <label>年月:
         <input type="month" data-action-change="todo-month-filter" value="${ui.todoFilterMonth}">
       </label>
+      <form class="save-filter-form" data-action-submit="save-filter">
+        <input type="text" name="name" placeholder="現在の条件を名前で保存..." maxlength="40" required>
+        <button class="btn" type="submit" title="現在の絞り込み条件を保存">💾 保存</button>
+      </form>
+      ${ui.activeFilterId ? `<button class="btn-icon danger" data-action="delete-filter" data-id="${esc(ui.activeFilterId)}" title="この保存済みフィルターを削除">🗑</button>` : ''}
     </div>`;
 }
 
@@ -688,6 +709,7 @@ function buildHash() {
     if (ui.todoFilterProject) params.set('project', ui.todoFilterProject);
     if (ui.todoFilterImportance !== '') params.set('importance', ui.todoFilterImportance);
     if (ui.todoFilterMonth) params.set('month', ui.todoFilterMonth);
+    if (ui.activeFilterId) params.set('filter', ui.activeFilterId);
   } else if (ui.tab === 'timeline') {
     params.set('date', ui.timelineDate);
   } else if (ui.tab === 'gantt') {
@@ -720,6 +742,8 @@ function applyHash() {
     ui.todoFilterProject = projectById(projectId) ? projectId : '';
     ui.todoFilterImportance = ['0', '1', '2', '3'].includes(importance) ? importance : '';
     ui.todoFilterMonth = HASH_MONTH_RE.test(month) ? month : '';
+    const filterId = params.get('filter');
+    ui.activeFilterId = filterId && data.filters.some((f) => f.id === filterId) ? filterId : null;
     const project = projectById(ui.todoFilterProject);
     if (project && ui.todoFilterClient && project.clientId !== ui.todoFilterClient) {
       ui.todoFilterProject = '';
@@ -1775,6 +1799,13 @@ document.addEventListener('click', (ev) => {
     case 'del-task':
       deleteTask(id);
       return;
+    case 'delete-filter': {
+      if (!confirm('この保存済みフィルターを削除します。よろしいですか?')) return;
+      data.filters = data.filters.filter((f) => f.id !== id);
+      if (ui.activeFilterId === id) ui.activeFilterId = null;
+      save();
+      break;
+    }
     case 'del-subtask':
       deleteSubtask(id, el.dataset.subtaskId);
       return;
@@ -1901,6 +1932,7 @@ document.addEventListener('change', (ev) => {
     }
     case 'todo-client-filter': {
       ui.todoFilterClient = el.value;
+      ui.activeFilterId = null;
       const project = projectById(ui.todoFilterProject);
       if (project && ui.todoFilterClient && project.clientId !== ui.todoFilterClient) {
         ui.todoFilterProject = '';
@@ -1909,6 +1941,7 @@ document.addEventListener('change', (ev) => {
     }
     case 'todo-filter':
       ui.todoFilterProject = el.value;
+      ui.activeFilterId = null;
       if (ui.todoFilterProject) {
         const project = projectById(ui.todoFilterProject);
         ui.todoFilterClient = project ? (project.clientId || '') : ui.todoFilterClient;
@@ -1916,10 +1949,22 @@ document.addEventListener('change', (ev) => {
       break;
     case 'todo-importance-filter':
       ui.todoFilterImportance = el.value;
+      ui.activeFilterId = null;
       break;
     case 'todo-month-filter':
       ui.todoFilterMonth = HASH_MONTH_RE.test(el.value) ? el.value : '';
+      ui.activeFilterId = null;
       break;
+    case 'apply-saved-filter': {
+      const f = el.value ? data.filters.find((x) => x.id === el.value) : null;
+      if (el.value && !f) return; // 削除済みなどで見つからない場合は何もしない
+      ui.todoFilterClient = f ? (f.clientId || '') : '';
+      ui.todoFilterProject = f ? (f.projectId || '') : '';
+      ui.todoFilterImportance = f ? f.importance : '';
+      ui.todoFilterMonth = f ? f.month : '';
+      ui.activeFilterId = f ? f.id : null;
+      break;
+    }
     case 'import-backup': {
       const file = el.files && el.files[0];
       el.value = '';
@@ -1993,6 +2038,26 @@ document.addEventListener('submit', (ev) => {
       t.note = String(fd.get('note') || '').trim() || null;
       Object.assign(t, planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')));
       clearEditing();
+      break;
+    }
+    case 'save-filter': {
+      const name = String(fd.get('name')).trim();
+      if (!name) return;
+      const snapshot = {
+        clientId: ui.todoFilterClient || null,
+        projectId: ui.todoFilterProject || null,
+        importance: ui.todoFilterImportance || '',
+        month: ui.todoFilterMonth || '',
+      };
+      const existing = data.filters.find((f) => f.name === name);
+      if (existing) {
+        Object.assign(existing, snapshot);
+        ui.activeFilterId = existing.id;
+      } else {
+        const nf = { id: uid(), name, ...snapshot };
+        data.filters.push(nf);
+        ui.activeFilterId = nf.id;
+      }
       break;
     }
     case 'add-subtask': {

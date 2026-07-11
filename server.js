@@ -71,6 +71,19 @@ function sanitizeData(d) {
       };
     }),
     entries: d.entries || [],
+    // 保存済みフィルター。id/nameが無い・不正な要素は除外し、値はselect要素の照合にのみ使う列挙値に強制する
+    filters: Array.isArray(d.filters)
+      ? d.filters
+          .filter((f) => f && typeof f.name === 'string' && f.name.trim() !== '')
+          .map((f) => ({
+            id: typeof f.id === 'string' && f.id ? f.id : crypto.randomUUID(),
+            name: f.name,
+            clientId: typeof f.clientId === 'string' ? f.clientId : null,
+            projectId: typeof f.projectId === 'string' ? f.projectId : null,
+            importance: ['', '0', '1', '2', '3'].includes(f.importance) ? f.importance : '',
+            month: typeof f.month === 'string' && /^\d{4}-\d{2}$/.test(f.month) ? f.month : '',
+          }))
+      : [],
   };
 }
 
