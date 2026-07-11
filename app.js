@@ -1455,6 +1455,86 @@ function aggregate(fromStr, toStr) {
   return tree;
 }
 
+// 集計タブ: 日別(範囲が長い場合は週別)の作業時間バケットを作る
+function trendBuckets(fromStr, toStr) {
+  const now = Date.now();
+  const rangeStart = fromDateStr(fromStr);
+  const totalDays = Math.round((fromDateStr(toStr) - rangeStart) / 86400000) + 1;
+  const bucketDays = totalDays > 62 ? 7 : 1;
+  const buckets = [];
+  for (let i = 0; i < totalDays; i += bucketDays) {
+    const bStart = new Date(rangeStart);
+    bStart.setDate(bStart.getDate() + i);
+    const bEnd = new Date(bStart);
+    bEnd.setDate(bEnd.getDate() + Math.min(bucketDays, totalDays - i));
+    buckets.push({ day: toDateStr(bStart), start: bStart.getTime(), end: bEnd.getTime(), ms: 0 });
+  }
+  for (const e of data.entries) {
+    const effEnd = e.end === null ? now : e.end;
+    for (const b of buckets) {
+      const overlap = Math.min(effEnd, b.end) - Math.max(e.start, b.start);
+      if (overlap > 0) b.ms += overlap;
+    }
+  }
+  return { buckets, bucketDays };
+}
+
+// 集計タブ: 日別/週別の推移バーチャート
+function renderTrendChart(fromStr, toStr) {
+  const { buckets, bucketDays } = trendBuckets(fromStr, toStr);
+  if (!buckets.length) return '';
+  const maxMs = Math.max(1, ...buckets.map((b) => b.ms));
+  const labelStep = Math.max(1, Math.ceil(buckets.length / 10));
+  const cols = buckets.map((b, i) => {
+    const pct = b.ms > 0 ? Math.max((b.ms / maxMs) * 100, 3) : 0;
+    const rangeEndStr = toDateStr(new Date(b.end - 86400000));
+    const tip = bucketDays === 1
+      ? `${fmtDateJa(b.day)}\n${fmtDur(b.ms)}`
+      : `${fmtShortDate(b.day)} 〜 ${fmtShortDate(rangeEndStr)}\n${fmtDur(b.ms)}`;
+    const showLabel = i % labelStep === 0 || i === buckets.length - 1;
+    return `<div class="chart-col" title="${esc(tip)}">
+      <div class="chart-col-track"><div class="chart-col-bar" style="height:${pct}%"></div></div>
+      <div class="chart-col-label">${showLabel ? esc(fmtShortDate(b.day)) : ''}</div>
+    </div>`;
+  }).join('');
+  return `
+    <div class="chart-block">
+      <h3 class="chart-title">📈 ${bucketDays === 1 ? '日別' : '週別'}の推移</h3>
+      <div class="chart-trend-wrap"><div class="chart-trend" style="min-width:${Math.max(buckets.length * 22, 100)}px">${cols}</div></div>
+    </div>`;
+}
+
+// 集計タブ: プロジェクト別内訳バーチャート(上位8件 + その他)
+function renderProjectBreakdownChart(tree, grandTotal) {
+  const list = [];
+  for (const [, cNode] of tree) {
+    for (const [projectId, pNode] of cNode.projects) list.push({ projectId, total: pNode.total });
+  }
+  list.sort((a, b) => b.total - a.total);
+  if (!list.length) return '';
+  const TOP_N = 8;
+  const rows = list.slice(0, TOP_N);
+  const restTotal = list.slice(TOP_N).reduce((s, r) => s + r.total, 0);
+  if (restTotal > 0) rows.push({ projectId: null, total: restTotal, other: true });
+  const maxTotal = Math.max(1, ...rows.map((r) => r.total));
+  const bars = rows.map((r) => {
+    const label = r.other ? 'その他' : projectLabel(r.projectId);
+    const color = r.other ? 'var(--text-sub)' : projectColor(r.projectId);
+    const pct = grandTotal ? Math.round((r.total / grandTotal) * 100) : 0;
+    const widthPct = Math.max((r.total / maxTotal) * 100, 2);
+    return `<div class="chart-bar-row">
+      <span class="chart-bar-label" title="${esc(label)}">${esc(label)}</span>
+      <span class="chart-bar-track"><span class="chart-bar-fill" style="width:${widthPct}%;background:${color}"></span></span>
+      <span class="chart-bar-value">${fmtDur(r.total)}<small>(${pct}%)</small></span>
+    </div>`;
+  }).join('');
+  return `
+    <div class="chart-block">
+      <h3 class="chart-title">📁 プロジェクト別の内訳</h3>
+      <div class="chart-bars">${bars}</div>
+    </div>`;
+}
+
 function renderReport() {
   const tree = aggregate(ui.aggFrom, ui.aggTo);
   let grandTotal = 0;
@@ -1512,6 +1592,8 @@ function renderReport() {
       </div>
       <div class="report-total">${fmtDur(grandTotal)}<small>(${hours}h) ${fmtDateJa(ui.aggFrom)} 〜 ${fmtDateJa(ui.aggTo)}</small></div>
       ${rows.length ? `
+        ${renderTrendChart(ui.aggFrom, ui.aggTo)}
+        ${renderProjectBreakdownChart(tree, grandTotal)}
         <table class="report-table">
           <thead><tr><th>クライアント / プロジェクト / タスク</th><th class="num">時間</th><th class="num">割合</th></tr></thead>
           <tbody>${rows.join('')}</tbody>
