@@ -9,17 +9,20 @@
 <body>
   <header class="app-header">
     <div class="brand">
-      <span class="brand-mark">✦</span>
-      <h1>Enchanter</h1>
+      <span class="brand-mark" aria-hidden="true">✦</span>
+      <span class="brand-copy">
+        <h1>Enchanter</h1>
+        <span class="brand-tagline">タスクと時間を整える</span>
+      </span>
     </div>
     <div id="running-box" class="running-box"></div>
-    <nav class="tabs">
-      <button class="tab-btn" data-action="tab" data-tab="todo">Todo</button>
-      <button class="tab-btn" data-action="tab" data-tab="kanban">カンバン</button>
-      <button class="tab-btn" data-action="tab" data-tab="timeline">タイムライン</button>
-      <button class="tab-btn" data-action="tab" data-tab="gantt">ガント</button>
-      <button class="tab-btn" data-action="tab" data-tab="report">集計</button>
-      <button class="tab-btn" data-action="tab" data-tab="manage">管理</button>
+    <nav class="tabs" aria-label="メインナビゲーション">
+      <button type="button" class="tab-btn" data-action="tab" data-tab="todo" aria-current="page"><span class="tab-icon" aria-hidden="true">✓</span>Todo</button>
+      <button type="button" class="tab-btn" data-action="tab" data-tab="kanban"><span class="tab-icon" aria-hidden="true">▦</span>カンバン</button>
+      <button type="button" class="tab-btn" data-action="tab" data-tab="timeline"><span class="tab-icon" aria-hidden="true">◷</span>タイムライン</button>
+      <button type="button" class="tab-btn" data-action="tab" data-tab="gantt"><span class="tab-icon" aria-hidden="true">≋</span>ガント</button>
+      <button type="button" class="tab-btn" data-action="tab" data-tab="report"><span class="tab-icon" aria-hidden="true">◔</span>集計</button>
+      <button type="button" class="tab-btn" data-action="tab" data-tab="manage"><span class="tab-icon" aria-hidden="true">⚙</span>管理</button>
     </nav>
   </header>
   <main id="view" class="view"></main>

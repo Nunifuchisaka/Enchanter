@@ -139,6 +139,7 @@ async function disconnectGoogle() {
 
 let saveWarned = false;
 let saveChain = Promise.resolve();
+let pendingFocusState = null;
 
 // 保存はサーバーに直列で送る(連打しても順序が入れ替わらないように)
 function save() {
@@ -292,11 +293,18 @@ function timeOptions(selected) {
   return html;
 }
 
-function timeSelect(name, value, { required = false, disabled = false } = {}) {
+function timeSelect(name, value, { required = false, disabled = false, label = '' } = {}) {
   const placeholder = value
     ? ''
     : `<option value="" selected${required ? ' disabled' : ''}>--:--</option>`;
-  return `<select name="${name}"${required ? ' required' : ''}${disabled ? ' disabled' : ''}>${placeholder}${timeOptions(value)}</select>`;
+  const fallbackLabels = {
+    plannedStartTime: '予定開始時刻',
+    plannedEndTime: '予定終了時刻',
+    start: '開始時刻',
+    end: '終了時刻',
+  };
+  const ariaLabel = label || fallbackLabels[name] || '時刻';
+  return `<select name="${name}" aria-label="${esc(ariaLabel)}"${required ? ' required' : ''}${disabled ? ' disabled' : ''}>${placeholder}${timeOptions(value)}</select>`;
 }
 
 // 経過時間 → "1:23:45"
@@ -705,35 +713,59 @@ function savedFilterOptions() {
 function todoFilterRow() {
   const hasTags = allTags().length > 0 || ui.todoFilterTag;
   const hasCategories = data.categories.length > 0 || ui.todoFilterCategory;
+  const filterCount = [
+    ui.todoFilterClient,
+    ui.todoFilterProject,
+    ui.todoFilterCategory,
+    ui.todoFilterImportance,
+    ui.todoFilterMonth,
+    ui.todoFilterTag,
+  ].filter(Boolean).length;
+  const filtersOpen = filterCount > 0 || ui.activeFilterId ||
+    (ui.tab === 'todo' && !window.matchMedia('(max-width: 720px)').matches);
   return `
-    <div class="filter-row">
-      <label>保存済み:
+    <details class="filter-panel" data-details-key="${ui.tab}-filters"${filtersOpen ? ' open' : ''}>
+      <summary class="filter-panel-heading">
+        <div>
+          <span class="section-eyebrow">表示条件</span>
+          <strong>タスクを絞り込む</strong>
+          <span class="filter-status">${filterCount ? `${filterCount}項目を指定中` : 'すべて表示中'}</span>
+        </div>
+      </summary>
+      <div class="filter-panel-content">
+        <div class="filter-grid">
+        <label class="field"><span class="field-label">保存済み</span>
         <select data-action-change="apply-saved-filter">${savedFilterOptions()}</select>
       </label>
-      <label>クライアント:
+        <label class="field"><span class="field-label">クライアント</span>
         <select data-action-change="todo-client-filter">${clientOptions(ui.todoFilterClient, 'すべて')}</select>
       </label>
-      <label>プロジェクト:
+        <label class="field field-project"><span class="field-label">プロジェクト</span>
         <select data-action-change="todo-filter">${projectOptions(ui.todoFilterProject, 'すべて', ui.todoFilterClient)}</select>
       </label>
-      ${hasCategories ? `<label>カテゴリ:
+        ${hasCategories ? `<label class="field"><span class="field-label">カテゴリ</span>
         <select data-action-change="todo-category-filter">${categoryOptions(ui.todoFilterCategory, 'すべて')}</select>
       </label>` : ''}
-      <label>重要度:
+        <label class="field"><span class="field-label">重要度</span>
         <select data-action-change="todo-importance-filter">${importanceFilterOptions(ui.todoFilterImportance)}</select>
       </label>
-      <label>年月:
+        <label class="field"><span class="field-label">年月</span>
         <input type="month" data-action-change="todo-month-filter" value="${ui.todoFilterMonth}">
       </label>
-      ${hasTags ? `<label>タグ:
+        ${hasTags ? `<label class="field"><span class="field-label">タグ</span>
         <select data-action-change="todo-tag-filter">${tagFilterOptions(ui.todoFilterTag)}</select>
       </label>` : ''}
-      <form class="save-filter-form" data-action-submit="save-filter">
-        <input type="text" name="name" placeholder="現在の条件を名前で保存..." maxlength="40" required>
-        <button class="btn" type="submit" title="現在の絞り込み条件を保存">💾 保存</button>
-      </form>
-      ${ui.activeFilterId ? `<button class="btn-icon danger" data-action="delete-filter" data-id="${esc(ui.activeFilterId)}" title="この保存済みフィルターを削除">🗑</button>` : ''}
-    </div>`;
+        </div>
+        <div class="filter-save-row">
+          <form class="save-filter-form" data-action-submit="save-filter">
+            <input type="text" name="name" placeholder="現在の条件を名前で保存..." maxlength="40" required>
+            <button class="btn" type="submit" title="現在の絞り込み条件を保存">保存</button>
+          </form>
+          ${filterCount || ui.activeFilterId ? '<button class="btn btn-quiet" type="button" data-action="clear-todo-filters">条件をクリア</button>' : ''}
+          ${ui.activeFilterId ? `<button class="btn-icon danger" data-action="delete-filter" data-id="${esc(ui.activeFilterId)}" title="この保存済みフィルターを削除" aria-label="この保存済みフィルターを削除">🗑</button>` : ''}
+        </div>
+      </div>
+    </details>`;
 }
 
 const TASK_STATUS_ORDER = ['todo', 'in_progress', 'waiting_review', 'done'];
@@ -863,9 +895,27 @@ function applyHash() {
 }
 
 function renderAll() {
+  const previousView = document.getElementById('view');
+  const focusedControl = document.activeElement && document.activeElement.closest
+    ? document.activeElement.closest('#view [data-action-change]')
+    : null;
+  const focusState = pendingFocusState || (focusedControl ? {
+    action: focusedControl.dataset.actionChange,
+    id: focusedControl.dataset.id || '',
+    subtaskId: focusedControl.dataset.subtaskId || '',
+  } : null);
+  pendingFocusState = null;
+  const detailStates = new Map(
+    [...previousView.querySelectorAll('details[data-details-key]')]
+      .map((detail) => [detail.dataset.detailsKey, detail.open])
+  );
+
   renderRunningBox();
   document.querySelectorAll('.tab-btn').forEach((b) => {
-    b.classList.toggle('active', b.dataset.tab === ui.tab);
+    const active = b.dataset.tab === ui.tab;
+    b.classList.toggle('active', active);
+    if (active) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
   });
   const view = document.getElementById('view');
   view.classList.toggle('view-wide', ui.tab === 'gantt' || ui.tab === 'kanban');
@@ -876,6 +926,21 @@ function renderAll() {
   else if (ui.tab === 'gantt') view.innerHTML = renderGantt();
   else if (ui.tab === 'report') view.innerHTML = renderReport();
   else view.innerHTML = renderManage();
+
+  view.querySelectorAll('details[data-details-key]').forEach((detail) => {
+    if (detailStates.has(detail.dataset.detailsKey)) {
+      detail.open = detailStates.get(detail.dataset.detailsKey);
+    }
+  });
+  if (focusState) {
+    const candidates = [...view.querySelectorAll(`[data-action-change="${focusState.action}"]`)];
+    const nextFocus = candidates.find((candidate) =>
+      (candidate.dataset.id || '') === focusState.id &&
+      (candidate.dataset.subtaskId || '') === focusState.subtaskId
+    );
+    if (nextFocus) nextFocus.focus({ preventScroll: true });
+  }
+
   // 全ての状態変更はここを通るので、URLへの反映はこの1箇所だけでよい
   // (replaceStateはhashchangeを発火しないのでループしない)
   history.replaceState(null, '', location.pathname + location.search + buildHash());
@@ -900,11 +965,11 @@ function renderRunningBox() {
         <span class="running-task">${esc(task ? task.title : '(削除済みタスク)')}</span>
         ${projectHtml}
         <span class="running-elapsed" data-live-since="${r.start}">${fmtClock(Date.now() - r.start)}</span>
-        <button class="btn-icon danger" data-action="stop-timer" data-id="${r.id}" title="計測を停止">■</button>
+        <button class="btn-icon danger" data-action="stop-timer" data-id="${r.id}" title="計測を停止" aria-label="${esc(task ? task.title : 'タスク')}の計測を停止">■</button>
       </span>`;
   }).join('');
   const stopAll = running.length > 1
-    ? '<button class="btn-icon danger" data-action="stop-all-timers">すべて停止</button>'
+    ? '<button class="btn btn-quiet danger" data-action="stop-all-timers">すべて停止</button>'
     : '';
   box.innerHTML = pills + stopAll;
 }
@@ -922,47 +987,55 @@ function renderTodo() {
 
   const subtaskBlock = (t) => {
     const subtasks = t.subtasks || [];
+    const doneCount = subtasks.filter((s) => s.done).length;
     return `
-      <ul class="subtask-list">
-        ${subtasks.map((s) => `
-          <li class="subtask-item ${s.done ? 'done' : ''}">
-            <input type="checkbox" ${s.done ? 'checked' : ''} data-action-change="toggle-subtask" data-id="${t.id}" data-subtask-id="${s.id}">
-            <span class="subtask-title">${esc(s.title)}</span>
-            <button class="btn-icon danger" data-action="del-subtask" data-id="${t.id}" data-subtask-id="${s.id}" title="削除">🗑</button>
-          </li>`).join('')}
-      </ul>
-      <form class="subtask-add-form" data-action-submit="add-subtask" data-id="${t.id}">
-        <input type="text" name="title" placeholder="サブタスクを追加..." required>
-        <button class="btn-icon" type="submit" title="追加">＋</button>
-      </form>`;
+      <details class="subtask-block" data-details-key="subtask-${t.id}"${subtasks.length ? ' open' : ''}>
+        <summary>${subtasks.length ? `チェックリスト <span>${doneCount}/${subtasks.length}</span>` : 'チェックリストを追加'}</summary>
+        <div class="subtask-content">
+          <ul class="subtask-list">
+            ${subtasks.map((s) => `
+              <li class="subtask-item ${s.done ? 'done' : ''}">
+                <input type="checkbox" ${s.done ? 'checked' : ''} data-action-change="toggle-subtask" data-id="${t.id}" data-subtask-id="${s.id}" aria-label="${esc(s.title)}を${s.done ? '未完了に戻す' : '完了にする'}">
+                <span class="subtask-title">${esc(s.title)}</span>
+                <button class="btn-icon danger" data-action="del-subtask" data-id="${t.id}" data-subtask-id="${s.id}" title="サブタスクを削除" aria-label="${esc(s.title)}を削除">🗑</button>
+              </li>`).join('')}
+          </ul>
+          <form class="subtask-add-form" data-action-submit="add-subtask" data-id="${t.id}">
+            <input type="text" name="title" placeholder="サブタスクを追加..." aria-label="サブタスク名" required>
+            <button class="btn-icon" type="submit" title="サブタスクを追加" aria-label="サブタスクを追加">＋</button>
+          </form>
+        </div>
+      </details>`;
   };
 
   const taskRow = (t) => {
     if (ui.editingTask === t.id) {
       return `
-        <li class="task-item">
-          <form class="edit-form" data-action-submit="save-task" data-id="${t.id}">
-            <input type="text" name="title" value="${esc(t.title)}" required>
-            <select name="projectId">${projectOptions(t.projectId)}</select>
-            ${data.categories.length ? `<select name="categoryId">${categoryOptions(t.categoryId)}</select>` : ''}
-            <span class="plan-inputs">予定
-              <input type="date" name="plannedStart" value="${t.plannedStart || ''}">
-              ${timeSelect('plannedStartTime', t.plannedStartTime || '')}
-              〜
-              <input type="date" name="plannedEnd" value="${t.plannedEnd || ''}">
-              ${timeSelect('plannedEndTime', t.plannedEndTime || '')}
-            </span>
-            <select name="importance">${importanceOptions(t.importance)}</select>
-            <select name="repeat">${repeatOptions(t.repeat || '')}</select>
-            <span class="estimate-input">見積
-              <input type="number" name="estimateMinutes" min="0" value="${t.estimateMinutes || ''}" placeholder="--">分
-            </span>
-            <input type="text" name="tags" value="${esc((t.tags || []).join(', '))}" placeholder="タグ(カンマ区切り)" autocomplete="off">
-            <textarea name="note" rows="2" placeholder="メモ(任意)">${esc(t.note || '')}</textarea>
-            <button class="btn btn-primary" type="submit">保存</button>
-            <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
-          </form>
-          ${subtaskBlock(t)}
+        <li class="task-item task-item-editing">
+          <div class="task-main editing-task-main">
+            <form class="edit-form" data-action-submit="save-task" data-id="${t.id}">
+              <input type="text" name="title" value="${esc(t.title)}" aria-label="タスク名" required>
+              <select name="projectId" aria-label="プロジェクト">${projectOptions(t.projectId)}</select>
+              ${data.categories.length ? `<select name="categoryId" aria-label="カテゴリ">${categoryOptions(t.categoryId)}</select>` : ''}
+              <span class="plan-inputs">予定
+                <input type="date" name="plannedStart" value="${t.plannedStart || ''}" aria-label="予定開始日">
+                ${timeSelect('plannedStartTime', t.plannedStartTime || '')}
+                〜
+                <input type="date" name="plannedEnd" value="${t.plannedEnd || ''}" aria-label="予定終了日">
+                ${timeSelect('plannedEndTime', t.plannedEndTime || '')}
+              </span>
+              <select name="importance" aria-label="重要度">${importanceOptions(t.importance)}</select>
+              <select name="repeat" aria-label="繰り返し">${repeatOptions(t.repeat || '')}</select>
+              <span class="estimate-input">見積
+                <input type="number" name="estimateMinutes" min="0" value="${t.estimateMinutes || ''}" placeholder="--" aria-label="見積時間（分）">分
+              </span>
+              <input type="text" name="tags" value="${esc((t.tags || []).join(', '))}" placeholder="タグ(カンマ区切り)" aria-label="タグ" autocomplete="off">
+              <textarea name="note" rows="2" placeholder="メモ(任意)" aria-label="メモ">${esc(t.note || '')}</textarea>
+              <button class="btn btn-primary" type="submit">保存</button>
+              <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
+            </form>
+            ${subtaskBlock(t)}
+          </div>
         </li>`;
     }
     const totalMs = data.entries
@@ -984,7 +1057,7 @@ function renderTodo() {
     } else if (running) {
       timerBtn = `
         <button class="timer-btn stop" data-action="stop-timer" data-id="${running.id}">■ <span data-live-since="${running.start}">${fmtClock(now - running.start)}</span></button>
-        <button class="btn-icon" data-action="edit-entry" data-id="${running.id}" title="開始時刻を編集">✎</button>`;
+        <button class="btn-icon" data-action="edit-entry" data-id="${running.id}" title="開始時刻を編集" aria-label="${esc(t.title)}の開始時刻を編集">✎</button>`;
     } else {
       timerBtn = `<button class="timer-btn start" data-action="start-timer" data-id="${t.id}">▶ 計測</button>`;
     }
@@ -1010,8 +1083,8 @@ function renderTodo() {
         </div>
         <div class="task-actions">
           ${timerBtn}
-          <button class="btn-icon" data-action="edit-task" data-id="${t.id}" title="編集">✎</button>
-          <button class="btn-icon danger" data-action="del-task" data-id="${t.id}" title="削除">🗑</button>
+          <button class="btn-icon" data-action="edit-task" data-id="${t.id}" title="タスクを編集" aria-label="${esc(t.title)}を編集">✎</button>
+          <button class="btn-icon danger" data-action="del-task" data-id="${t.id}" title="タスクを削除" aria-label="${esc(t.title)}を削除">🗑</button>
         </div>
       </li>`;
   };
@@ -1023,47 +1096,84 @@ function renderTodo() {
   const done = tasks.filter((t) => t.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
   return `
-    <div class="card">
-      <h2>➕ タスクを追加</h2>
-      <form class="add-form" data-action-submit="add-task">
-        <input type="text" name="title" placeholder="タスク名を入力..." required autocomplete="off">
-        <select name="projectId">${projectOptions(ui.todoFilterProject || '', undefined, ui.todoFilterClient)}</select>
-        ${data.categories.length ? `<select name="categoryId">${categoryOptions(ui.todoFilterCategory || '')}</select>` : ''}
-        <span class="plan-inputs">予定
-          <input type="date" name="plannedStart">
-          ${timeSelect('plannedStartTime', '')}
-          〜
-          <input type="date" name="plannedEnd">
-          ${timeSelect('plannedEndTime', '')}
-        </span>
-        <select name="importance">${importanceOptions(0)}</select>
-        <select name="repeat">${repeatOptions('')}</select>
-        <span class="estimate-input">見積
-          <input type="number" name="estimateMinutes" min="0" placeholder="--">分
-        </span>
-        <input type="text" name="tags" placeholder="タグ(カンマ区切り)" autocomplete="off">
-        <button class="btn btn-primary" type="submit">追加</button>
+    <div class="card create-card">
+      <div class="card-heading">
+        <div>
+          <span class="section-eyebrow">Quick add</span>
+          <h2>新しいタスク</h2>
+        </div>
+        <span class="shortcut-hint"><kbd>N</kbd> ですぐ入力</span>
+      </div>
+      <form class="add-form task-create-form" data-action-submit="add-task">
+        <div class="create-primary${data.categories.length ? '' : ' no-category'}">
+          <label class="field field-title"><span class="field-label">タスク名</span>
+            <input type="text" name="title" placeholder="次に取り組むことは？" required autocomplete="off">
+          </label>
+          <label class="field field-project"><span class="field-label">プロジェクト</span>
+            <select name="projectId">${projectOptions(ui.todoFilterProject || '', undefined, ui.todoFilterClient)}</select>
+          </label>
+          ${data.categories.length ? `<label class="field"><span class="field-label">カテゴリ</span>
+            <select name="categoryId">${categoryOptions(ui.todoFilterCategory || '')}</select>
+          </label>` : ''}
+          <button class="btn btn-primary create-submit" type="submit">タスクを追加</button>
+        </div>
+        <details class="create-details" data-details-key="task-create">
+          <summary>予定・重要度などを設定</summary>
+          <div class="create-details-grid">
+            <fieldset class="field field-wide plan-field">
+              <legend class="field-label">予定</legend>
+              <span class="plan-inputs">
+                <input type="date" name="plannedStart" aria-label="予定開始日">
+                ${timeSelect('plannedStartTime', '')}
+                <span aria-hidden="true">〜</span>
+                <input type="date" name="plannedEnd" aria-label="予定終了日">
+                ${timeSelect('plannedEndTime', '')}
+              </span>
+            </fieldset>
+            <label class="field"><span class="field-label">重要度</span>
+              <select name="importance">${importanceOptions(0)}</select>
+            </label>
+            <label class="field"><span class="field-label">繰り返し</span>
+              <select name="repeat">${repeatOptions('')}</select>
+            </label>
+            <label class="field"><span class="field-label">見積時間（分）</span>
+              <input type="number" name="estimateMinutes" min="0" placeholder="例: 60">
+            </label>
+            <label class="field field-tags"><span class="field-label">タグ</span>
+              <input type="text" name="tags" placeholder="デザイン, 急ぎ" autocomplete="off">
+            </label>
+          </div>
+        </details>
       </form>
     </div>
-    <div class="card">
-      <h2>📋 Todoリスト</h2>
+    <div class="card task-card">
+      <div class="card-heading">
+        <div>
+          <span class="section-eyebrow">Tasks</span>
+          <h2>タスク一覧</h2>
+        </div>
+        <span class="task-overview">${active.length + inProgress.length + waitingReview.length}件の進行中タスク</span>
+      </div>
       ${todoFilterRow()}
-      <ul class="task-list">
-        ${active.length ? active.map(taskRow).join('') : '<li class="empty">未完了のタスクはありません</li>'}
-      </ul>
+      <section class="task-section todo-section">
+        <h3 class="task-section-heading"><span class="status-dot status-todo"></span>未着手 <span class="section-count">${active.length}</span></h3>
+        <ul class="task-list">
+          ${active.length ? active.map(taskRow).join('') : '<li class="empty compact">未着手のタスクはありません</li>'}
+        </ul>
+      </section>
       ${inProgress.length ? `
-        <div class="in-progress-section">
-          <h3>▶ 作業中 (${inProgress.length})</h3>
+        <section class="task-section in-progress-section">
+          <h3 class="task-section-heading"><span class="status-dot status-progress"></span>作業中 <span class="section-count">${inProgress.length}</span></h3>
           <ul class="task-list">${inProgress.map(taskRow).join('')}</ul>
-        </div>` : ''}
+        </section>` : ''}
       ${waitingReview.length ? `
-        <div class="waiting-review-section">
-          <h3>⏳ 作業済み・確認待ち (${waitingReview.length})</h3>
+        <section class="task-section waiting-review-section">
+          <h3 class="task-section-heading"><span class="status-dot status-review"></span>作業済み・確認待ち <span class="section-count">${waitingReview.length}</span></h3>
           <ul class="task-list">${waitingReview.map(taskRow).join('')}</ul>
-        </div>` : ''}
+        </section>` : ''}
       ${done.length ? `
-        <details class="done-section">
-          <summary>完了済み (${done.length})</summary>
+        <details class="done-section" data-details-key="done-tasks">
+          <summary><span class="status-dot status-done"></span>完了済み <span class="section-count">${done.length}</span></summary>
           <ul class="task-list">${done.map(taskRow).join('')}</ul>
         </details>` : ''}
     </div>`;
@@ -1077,18 +1187,24 @@ function kanbanCard(t) {
   const subtasks = t.subtasks || [];
   const doneCount = subtasks.filter((s) => s.done).length;
   const running = runningEntryForTask(t.id);
+  const statusIndex = TASK_STATUS_ORDER.indexOf(t.status);
   return `
     <li class="kanban-card ${statusRowClass(t)}${isDueToday(t) ? ' due-today' : ''}"
       data-action-pointer="kanban-drag" data-id="${t.id}">
-      <div class="kanban-card-title">${esc(t.title)}</div>
-      <div class="kanban-card-meta">
-        ${projectChip(t.projectId)}
-        ${categoryChip(t)}
-        ${importanceChip(t)}
-        ${planChip(t)}
-        ${tagChips(t)}
-        ${subtasks.length ? `<span class="chip">☑ ${doneCount}/${subtasks.length}</span>` : ''}
-        ${running ? '<span class="chip kanban-running">● 計測中</span>' : ''}
+      <div class="kanban-card-control" tabindex="0" role="slider"
+        aria-label="${esc(t.title)}のステータス" aria-valuemin="0" aria-valuemax="${TASK_STATUS_ORDER.length - 1}"
+        aria-valuenow="${statusIndex}" aria-valuetext="${TASK_STATUS_LABELS[t.status]}"
+        aria-orientation="horizontal" aria-keyshortcuts="ArrowLeft ArrowRight">
+        <div class="kanban-card-title">${esc(t.title)}</div>
+        <div class="kanban-card-meta">
+          ${projectChip(t.projectId)}
+          ${categoryChip(t)}
+          ${importanceChip(t)}
+          ${planChip(t)}
+          ${tagChips(t)}
+          ${subtasks.length ? `<span class="chip">☑ ${doneCount}/${subtasks.length}</span>` : ''}
+          ${running ? '<span class="chip kanban-running">● 計測中</span>' : ''}
+        </div>
       </div>
     </li>`;
 }
@@ -1115,10 +1231,17 @@ function renderKanban() {
   }).join('');
 
   return `
-    <div class="card">
-      <h2>🗂 カンバンボード</h2>
+    <div class="card kanban-card-shell">
+      <div class="card-heading">
+        <div>
+          <span class="section-eyebrow">Board</span>
+          <h2>カンバンボード</h2>
+        </div>
+        <span class="task-overview">ドラッグしてステータスを変更</span>
+      </div>
       ${todoFilterRow()}
       <div class="kanban-board">${columns}</div>
+      ${byStatus.done.length > KANBAN_DONE_LIMIT ? `<p class="kanban-limit-note">完了は新しい${KANBAN_DONE_LIMIT}件を表示しています（全${byStatus.done.length}件）</p>` : ''}
     </div>`;
 }
 
@@ -1231,8 +1354,8 @@ function renderTimeline() {
         <span class="entry-dur">${fmtDur(e.clipEnd - e.clipStart)}</span>
         <span class="entry-task">${esc(task ? task.title : '(削除済みタスク)')} ${projectChip(task ? task.projectId : null)}</span>
         <span class="task-actions">
-          <button class="btn-icon" data-action="edit-entry" data-id="${e.id}" title="編集">✎</button>
-          <button class="btn-icon danger" data-action="del-entry" data-id="${e.id}" title="削除">🗑</button>
+          <button class="btn-icon" data-action="edit-entry" data-id="${e.id}" title="作業記録を編集" aria-label="${esc(task ? task.title : '削除済みタスク')}の作業記録を編集">✎</button>
+          <button class="btn-icon danger" data-action="del-entry" data-id="${e.id}" title="作業記録を削除" aria-label="${esc(task ? task.title : '削除済みタスク')}の作業記録を削除">🗑</button>
         </span>
       </li>`;
   };
@@ -1249,7 +1372,7 @@ function renderTimeline() {
         <span class="tl-date-label">${fmtDateJa(ui.timelineDate)}</span>
         <span class="tl-total">合計 ${fmtDur(totalMs)}</span>
         <button class="btn" data-action="tl-shift" data-days="-1">◀ 前日</button>
-        <input type="date" value="${ui.timelineDate}" data-action-change="tl-date">
+        <input type="date" value="${ui.timelineDate}" data-action-change="tl-date" aria-label="表示日">
         <button class="btn" data-action="tl-shift" data-days="1">翌日 ▶</button>
         <button class="btn" data-action="tl-today">今日</button>
       </div>
@@ -1269,7 +1392,7 @@ function renderTimeline() {
       <h2>➕ 作業記録を手動追加</h2>
       ${activeTasks.length ? `
         <form class="add-form" data-action-submit="add-entry">
-          <select name="taskId" required>${taskOpts}</select>
+          <select name="taskId" aria-label="タスク" required>${taskOpts}</select>
           ${timeSelect('start', '', { required: true })}
           〜
           ${timeSelect('end', '', { required: true })}
@@ -1336,7 +1459,7 @@ function renderGanttDay() {
         <span class="tl-date-label">🕐 1日</span>
         <span class="tl-total">${fmtDateJa(day)}</span>
         <button class="btn" data-action="gantt-day-shift" data-days="-1">◀ 前日</button>
-        <input type="date" value="${day}" data-action-change="gantt-date">
+        <input type="date" value="${day}" data-action-change="gantt-date" aria-label="1日表示の日付">
         <button class="btn" data-action="gantt-day-shift" data-days="1">翌日 ▶</button>
         <button class="btn" data-action="gantt-day-today">今日</button>
       </div>
@@ -1353,6 +1476,7 @@ function renderGanttDay() {
 // 週(複数日)単位: プロジェクトごとにまとめたタスクを日付軸に沿って表示するガントチャート
 function renderGanttWeek() {
   const days = ui.ganttDays;
+  const rangeLabel = { 7: '1週間', 14: '2週間', 28: '4週間', 56: '8週間' }[days] || `${days}日間`;
   const rowHeight = 28;
   const start = fromDateStr(ui.ganttStart);
   const startStr = ui.ganttStart;
@@ -1426,9 +1550,9 @@ function renderGanttWeek() {
   return `
     <div class="card">
       <div class="tl-header">
-        <span class="tl-date-label">📅 1週間</span>
+        <span class="tl-date-label">📅 ${rangeLabel}</span>
         <span class="tl-total">${fmtDateJa(startStr)} 〜 ${fmtDateJa(endStr)}</span>
-        <select data-action-change="gantt-days">
+        <select data-action-change="gantt-days" aria-label="ガントの表示期間">
           <option value="7"${days === 7 ? ' selected' : ''}>1週間</option>
           <option value="14"${days === 14 ? ' selected' : ''}>2週間</option>
           <option value="28"${days === 28 ? ' selected' : ''}>4週間</option>
@@ -1754,6 +1878,40 @@ function renderTagBreakdownChart(fromStr, toStr, grandTotal) {
     </div>`;
 }
 
+function quickRangeDates(range) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let from = new Date(today);
+  let to = new Date(today);
+  switch (range) {
+    case 'today':
+      break;
+    case 'yesterday':
+      from.setDate(from.getDate() - 1);
+      to = new Date(from);
+      break;
+    case 'week':
+      from = startOfWeek(today);
+      break;
+    case 'lastweek':
+      from = startOfWeek(today);
+      from.setDate(from.getDate() - 7);
+      to = new Date(from);
+      to.setDate(to.getDate() + 6);
+      break;
+    case 'month':
+      from = new Date(today.getFullYear(), today.getMonth(), 1);
+      break;
+    case 'lastmonth':
+      from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      to = new Date(today.getFullYear(), today.getMonth(), 0);
+      break;
+    default:
+      return null;
+  }
+  return { from: toDateStr(from), to: toDateStr(to) };
+}
+
 function renderReport() {
   const tree = aggregate(ui.aggFrom, ui.aggTo);
   let grandTotal = 0;
@@ -1788,22 +1946,29 @@ function renderReport() {
   }
 
   const hours = (grandTotal / 3600000).toFixed(2);
+  const quickRangeButtons = [
+    ['today', '今日'],
+    ['yesterday', '昨日'],
+    ['week', '今週'],
+    ['lastweek', '先週'],
+    ['month', '今月'],
+    ['lastmonth', '先月'],
+  ].map(([range, label]) => {
+    const dates = quickRangeDates(range);
+    const active = dates.from === ui.aggFrom && dates.to === ui.aggTo;
+    return `<button class="btn${active ? ' active' : ''}" data-action="quick-range" data-range="${range}" aria-pressed="${active}">${label}</button>`;
+  }).join('');
 
   return `
     <div class="card">
       <h2>📊 作業時間の集計</h2>
       <div class="report-controls">
-        <input type="date" value="${ui.aggFrom}" data-action-change="agg-from">
+        <input type="date" value="${ui.aggFrom}" data-action-change="agg-from" aria-label="集計開始日">
         〜
-        <input type="date" value="${ui.aggTo}" data-action-change="agg-to">
+        <input type="date" value="${ui.aggTo}" data-action-change="agg-to" aria-label="集計終了日">
       </div>
       <div class="quick-ranges">
-        <button class="btn" data-action="quick-range" data-range="today">今日</button>
-        <button class="btn" data-action="quick-range" data-range="yesterday">昨日</button>
-        <button class="btn" data-action="quick-range" data-range="week">今週</button>
-        <button class="btn" data-action="quick-range" data-range="lastweek">先週</button>
-        <button class="btn" data-action="quick-range" data-range="month">今月</button>
-        <button class="btn" data-action="quick-range" data-range="lastmonth">先月</button>
+        ${quickRangeButtons}
         <span class="export-btns">
           <button class="btn" data-action="export-report-csv" title="集計結果をCSVでダウンロード">⬇ 集計CSV</button>
           <button class="btn" data-action="export-entries-csv" title="作業記録の明細をCSVでダウンロード">⬇ 明細CSV</button>
@@ -1815,10 +1980,12 @@ function renderReport() {
         ${renderProjectBreakdownChart(tree, grandTotal)}
         ${renderCategoryBreakdownChart(ui.aggFrom, ui.aggTo, grandTotal)}
         ${renderTagBreakdownChart(ui.aggFrom, ui.aggTo, grandTotal)}
-        <table class="report-table">
-          <thead><tr><th>クライアント / プロジェクト / タスク</th><th class="num">時間</th><th class="num">割合</th></tr></thead>
-          <tbody>${rows.join('')}</tbody>
-        </table>` : '<p class="empty">この期間の作業記録はありません</p>'}
+        <div class="report-table-wrap">
+          <table class="report-table">
+            <thead><tr><th>クライアント / プロジェクト / タスク</th><th class="num">時間</th><th class="num">割合</th></tr></thead>
+            <tbody>${rows.join('')}</tbody>
+          </table>
+        </div>` : '<p class="empty">この期間の作業記録はありません</p>'}
     </div>`;
 }
 
@@ -1841,8 +2008,8 @@ function renderManage() {
       <li class="manage-item">
         <span class="name">${esc(c.name)}</span>
         <span class="sub">${count} プロジェクト</span>
-        <button class="btn-icon" data-action="edit-client" data-id="${c.id}" title="編集">✎</button>
-        <button class="btn-icon danger" data-action="del-client" data-id="${c.id}" title="削除">🗑</button>
+        <button class="btn-icon" data-action="edit-client" data-id="${c.id}" title="クライアントを編集" aria-label="${esc(c.name)}を編集">✎</button>
+        <button class="btn-icon danger" data-action="del-client" data-id="${c.id}" title="クライアントを削除" aria-label="${esc(c.name)}を削除">🗑</button>
       </li>`;
   };
 
@@ -1862,8 +2029,8 @@ function renderManage() {
       <li class="manage-item">
         <span class="name">${esc(c.name)}</span>
         <span class="sub">${count} タスク</span>
-        <button class="btn-icon" data-action="edit-category" data-id="${esc(c.id)}" title="編集">✎</button>
-        <button class="btn-icon danger" data-action="del-category" data-id="${esc(c.id)}" title="削除">🗑</button>
+        <button class="btn-icon" data-action="edit-category" data-id="${esc(c.id)}" title="カテゴリを編集" aria-label="${esc(c.name)}を編集">✎</button>
+        <button class="btn-icon danger" data-action="del-category" data-id="${esc(c.id)}" title="カテゴリを削除" aria-label="${esc(c.name)}を削除">🗑</button>
       </li>`;
   };
 
@@ -1897,8 +2064,8 @@ function renderManage() {
         <span class="name">${esc(p.name)}</span>
         ${p.customId ? `<span class="chip">${esc(p.customId)}</span>` : ''}
         <span class="sub">${client ? esc(client.name) : 'クライアントなし'} ・ ${count} タスク</span>
-        <button class="btn-icon" data-action="edit-project" data-id="${p.id}" title="編集">✎</button>
-        <button class="btn-icon danger" data-action="del-project" data-id="${p.id}" title="削除">🗑</button>
+        <button class="btn-icon" data-action="edit-project" data-id="${p.id}" title="プロジェクトを編集" aria-label="${esc(p.name)}を編集">✎</button>
+        <button class="btn-icon danger" data-action="del-project" data-id="${p.id}" title="プロジェクトを削除" aria-label="${esc(p.name)}を削除">🗑</button>
       </li>`;
   };
 
@@ -1930,7 +2097,7 @@ function renderManage() {
       <p class="backup-note">全データ(クライアント・プロジェクト・カテゴリ・タスク・作業記録)をJSONで書き出し/読み込みできます。インポートは現在のデータを全て置き換えます。</p>
       <div class="backup-actions">
         <button class="btn" data-action="export-backup">⬇ エクスポート</button>
-        <label class="btn file-btn">⬆ インポート<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
+        <label class="btn file-btn" role="button" tabindex="0">⬆ インポート<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
       </div>
     </div>`;
 
@@ -1938,7 +2105,7 @@ function renderManage() {
     <div class="card">
       <h2>⌨️ キーボードショートカット</h2>
       <ul class="shortcut-list">
-        <li><kbd>1</kbd>〜<kbd>5</kbd> タブ切替(Todo / タイムライン / ガント / 集計 / 管理)</li>
+        <li><kbd>1</kbd>〜<kbd>6</kbd> タブ切替(Todo / カンバン / タイムライン / ガント / 集計 / 管理)</li>
         <li><kbd>N</kbd> 新しいタスクを追加(Todoタブのタスク名入力へ)</li>
         <li><kbd>Esc</kbd> 編集をキャンセル</li>
       </ul>
@@ -2004,6 +2171,15 @@ document.addEventListener('click', (ev) => {
     case 'tab':
       ui.tab = el.dataset.tab;
       clearEditing();
+      break;
+    case 'clear-todo-filters':
+      ui.todoFilterClient = '';
+      ui.todoFilterProject = '';
+      ui.todoFilterCategory = '';
+      ui.todoFilterImportance = '';
+      ui.todoFilterMonth = '';
+      ui.todoFilterTag = '';
+      ui.activeFilterId = null;
       break;
     case 'start-timer':
       startTimer(id);
@@ -2117,34 +2293,10 @@ document.addEventListener('click', (ev) => {
       ui.ganttDate = toDateStr(new Date());
       break;
     case 'quick-range': {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      let from = new Date(today);
-      let to = new Date(today);
-      switch (el.dataset.range) {
-        case 'yesterday':
-          from.setDate(from.getDate() - 1);
-          to = new Date(from);
-          break;
-        case 'week':
-          from = startOfWeek(today);
-          break;
-        case 'lastweek':
-          from = startOfWeek(today);
-          from.setDate(from.getDate() - 7);
-          to = new Date(from);
-          to.setDate(to.getDate() + 6);
-          break;
-        case 'month':
-          from = new Date(today.getFullYear(), today.getMonth(), 1);
-          break;
-        case 'lastmonth':
-          from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-          to = new Date(today.getFullYear(), today.getMonth(), 0);
-          break;
-      }
-      ui.aggFrom = toDateStr(from);
-      ui.aggTo = toDateStr(to);
+      const dates = quickRangeDates(el.dataset.range);
+      if (!dates) return;
+      ui.aggFrom = dates.from;
+      ui.aggTo = dates.to;
       break;
     }
     default:
@@ -2241,6 +2393,11 @@ document.addEventListener('change', (ev) => {
     default:
       return;
   }
+  pendingFocusState = {
+    action: el.dataset.actionChange,
+    id: el.dataset.id || '',
+    subtaskId: el.dataset.subtaskId || '',
+  };
   renderAll();
 });
 
@@ -2585,6 +2742,30 @@ document.addEventListener('keydown', (ev) => {
   if (ev.isComposing) return; // 日本語入力の変換中は無視
   const t = ev.target;
   const isTextInput = t.matches && t.matches('input, textarea, select') || t.isContentEditable;
+  if (t.matches && t.matches('.file-btn') && (ev.key === 'Enter' || ev.key === ' ')) {
+    ev.preventDefault();
+    const input = t.querySelector('input[type="file"]');
+    if (input) input.click();
+    return;
+  }
+  const kanbanCardTarget = t.closest ? t.closest('.kanban-card') : null;
+  if (kanbanCardTarget && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
+    const task = taskById(kanbanCardTarget.dataset.id);
+    if (!task) return;
+    const currentIndex = TASK_STATUS_ORDER.indexOf(task.status);
+    const nextIndex = currentIndex + (ev.key === 'ArrowRight' ? 1 : -1);
+    if (nextIndex < 0 || nextIndex >= TASK_STATUS_ORDER.length) return;
+    ev.preventDefault();
+    if (setTaskStatus(task, TASK_STATUS_ORDER[nextIndex])) {
+      save();
+      renderAll();
+      const movedCard = [...document.querySelectorAll('.kanban-card')]
+        .find((card) => card.dataset.id === task.id);
+      const movedCardControl = movedCard ? movedCard.querySelector('.kanban-card-control') : null;
+      if (movedCardControl) movedCardControl.focus({ preventScroll: true });
+    }
+    return;
+  }
   if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && ev.key.toLowerCase() === 'z' && !isTextInput) {
     if (undoLastGanttDrag()) ev.preventDefault();
     return;
