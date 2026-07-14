@@ -445,9 +445,9 @@ function tagFilterOptions(selected) {
 const REPEAT_LABELS = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
 
 function repeatOptions(selected) {
-  let html = '<option value="">繰り返しなし</option>';
+  let html = '<option value="">限定的（繰り返しなし）</option>';
   for (const [value, label] of Object.entries(REPEAT_LABELS)) {
-    html += `<option value="${value}"${value === selected ? ' selected' : ''}>🔁 ${label}</option>`;
+    html += `<option value="${value}"${value === selected ? ' selected' : ''}>恒常的（${label}）</option>`;
   }
   return html;
 }
@@ -1025,7 +1025,7 @@ function renderTodo() {
                 ${timeSelect('plannedEndTime', t.plannedEndTime || '')}
               </span>
               <select name="importance" aria-label="重要度">${importanceOptions(t.importance)}</select>
-              <select name="repeat" aria-label="繰り返し">${repeatOptions(t.repeat || '')}</select>
+              <select name="repeat" aria-label="タスク種別">${repeatOptions(t.repeat || '')}</select>
               <span class="estimate-input">見積
                 <input type="number" name="estimateMinutes" min="0" value="${t.estimateMinutes || ''}" placeholder="--" aria-label="見積時間（分）">分
               </span>
@@ -1094,6 +1094,53 @@ function renderTodo() {
   const inProgress = tasks.filter((t) => t.status === 'in_progress').sort(compareActiveTasks);
   const waitingReview = tasks.filter((t) => t.status === 'waiting_review').sort(compareActiveTasks);
   const done = tasks.filter((t) => t.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+  const activeTasks = [...active, ...inProgress, ...waitingReview];
+  const taskGroups = [
+    {
+      key: 'limited',
+      title: '限定的なタスク',
+      description: '今取り組んで消化するタスク',
+      tasks: activeTasks.filter((t) => !t.repeat),
+    },
+    {
+      key: 'recurring',
+      title: '恒常的なタスク',
+      description: '繰り返し取り組むタスク',
+      tasks: activeTasks.filter((t) => t.repeat),
+    },
+  ];
+  const renderTaskGroup = (group) => {
+    const byStatus = {
+      todo: group.tasks.filter((t) => t.status === 'todo'),
+      in_progress: group.tasks.filter((t) => t.status === 'in_progress'),
+      waiting_review: group.tasks.filter((t) => t.status === 'waiting_review'),
+    };
+    return `
+      <section class="task-group task-group-${group.key}">
+        <div class="task-group-heading">
+          <div>
+            <h3>${group.title} <span class="section-count">${group.tasks.length}</span></h3>
+            <p>${group.description}</p>
+          </div>
+        </div>
+        <section class="task-section todo-section">
+          <h4 class="task-section-heading"><span class="status-dot status-todo"></span>未着手 <span class="section-count">${byStatus.todo.length}</span></h4>
+          <ul class="task-list">
+            ${byStatus.todo.length ? byStatus.todo.map(taskRow).join('') : '<li class="empty compact">未着手のタスクはありません</li>'}
+          </ul>
+        </section>
+        ${byStatus.in_progress.length ? `
+          <section class="task-section in-progress-section">
+            <h4 class="task-section-heading"><span class="status-dot status-progress"></span>作業中 <span class="section-count">${byStatus.in_progress.length}</span></h4>
+            <ul class="task-list">${byStatus.in_progress.map(taskRow).join('')}</ul>
+          </section>` : ''}
+        ${byStatus.waiting_review.length ? `
+          <section class="task-section waiting-review-section">
+            <h4 class="task-section-heading"><span class="status-dot status-review"></span>作業済み・確認待ち <span class="section-count">${byStatus.waiting_review.length}</span></h4>
+            <ul class="task-list">${byStatus.waiting_review.map(taskRow).join('')}</ul>
+          </section>` : ''}
+      </section>`;
+  };
 
   return `
     <div class="card create-card">
@@ -1118,7 +1165,7 @@ function renderTodo() {
           <button class="btn btn-primary create-submit" type="submit">タスクを追加</button>
         </div>
         <details class="create-details" data-details-key="task-create">
-          <summary>予定・重要度などを設定</summary>
+          <summary>予定・重要度・タスク種別などを設定</summary>
           <div class="create-details-grid">
             <fieldset class="field field-wide plan-field">
               <legend class="field-label">予定</legend>
@@ -1133,7 +1180,7 @@ function renderTodo() {
             <label class="field"><span class="field-label">重要度</span>
               <select name="importance">${importanceOptions(0)}</select>
             </label>
-            <label class="field"><span class="field-label">繰り返し</span>
+            <label class="field"><span class="field-label">タスク種別</span>
               <select name="repeat">${repeatOptions('')}</select>
             </label>
             <label class="field"><span class="field-label">見積時間（分）</span>
@@ -1155,22 +1202,7 @@ function renderTodo() {
         <span class="task-overview">${active.length + inProgress.length + waitingReview.length}件の進行中タスク</span>
       </div>
       ${todoFilterRow()}
-      <section class="task-section todo-section">
-        <h3 class="task-section-heading"><span class="status-dot status-todo"></span>未着手 <span class="section-count">${active.length}</span></h3>
-        <ul class="task-list">
-          ${active.length ? active.map(taskRow).join('') : '<li class="empty compact">未着手のタスクはありません</li>'}
-        </ul>
-      </section>
-      ${inProgress.length ? `
-        <section class="task-section in-progress-section">
-          <h3 class="task-section-heading"><span class="status-dot status-progress"></span>作業中 <span class="section-count">${inProgress.length}</span></h3>
-          <ul class="task-list">${inProgress.map(taskRow).join('')}</ul>
-        </section>` : ''}
-      ${waitingReview.length ? `
-        <section class="task-section waiting-review-section">
-          <h3 class="task-section-heading"><span class="status-dot status-review"></span>作業済み・確認待ち <span class="section-count">${waitingReview.length}</span></h3>
-          <ul class="task-list">${waitingReview.map(taskRow).join('')}</ul>
-        </section>` : ''}
+      ${taskGroups.map(renderTaskGroup).join('')}
       ${done.length ? `
         <details class="done-section" data-details-key="done-tasks">
           <summary><span class="status-dot status-done"></span>完了済み <span class="section-count">${done.length}</span></summary>

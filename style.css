@@ -945,6 +945,30 @@ fieldset.field {
   padding-top: 2px;
 }
 
+.task-group + .task-group {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 2px solid var(--border);
+}
+
+.task-group-heading {
+  margin-bottom: 14px;
+}
+
+.task-group-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+}
+
+.task-group-heading p {
+  margin: 3px 0 0;
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
 .task-section + .task-section,
 .done-section {
   margin-top: 14px;
