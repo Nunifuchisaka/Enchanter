@@ -825,6 +825,24 @@ fieldset.field {
   font-weight: 700;
 }
 
+.chip.weight-1 {
+  background: var(--surface-2);
+  color: var(--text-sub);
+}
+
+.chip.weight-2 {
+  background: var(--surface-3);
+  color: var(--text-sub);
+  font-weight: 600;
+}
+
+.chip.weight-3 {
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-weight: 700;
+}
+
 .chip.tag-chip {
   background: var(--accent-soft);
   color: var(--accent);

@@ -32,6 +32,7 @@ const ui = {
   todoFilterClient: '',
   todoFilterProject: '',
   todoFilterImportance: '',
+  todoFilterWeight: '',
   todoFilterMonth: '',
   todoFilterTag: '',
   todoFilterCategory: '',
@@ -405,6 +406,38 @@ function importanceChip(t) {
   return `<span class="chip importance-${importance}">重要度 ${IMPORTANCE_LABELS[importance]}</span>`;
 }
 
+// フォームの重さ入力を0〜3の整数へ正規化
+function parseWeight(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 && n <= 3 ? n : 0;
+}
+
+const WEIGHT_LABELS = ['指定なし', '軽い', 'ふつう', '重い'];
+
+function weightOptions(selected) {
+  let html = '';
+  const current = parseWeight(selected);
+  WEIGHT_LABELS.forEach((label, value) => {
+    html += `<option value="${value}"${value === current ? ' selected' : ''}>重さ: ${label}</option>`;
+  });
+  return html;
+}
+
+function weightFilterOptions(selected) {
+  let html = `<option value=""${selected === '' ? ' selected' : ''}>すべて</option>`;
+  WEIGHT_LABELS.forEach((label, value) => {
+    const stringValue = String(value);
+    html += `<option value="${stringValue}"${stringValue === selected ? ' selected' : ''}>${label}</option>`;
+  });
+  return html;
+}
+
+function weightChip(t) {
+  const weight = parseWeight(t.weight);
+  if (!weight) return '';
+  return `<span class="chip weight-${weight}">重さ ${WEIGHT_LABELS[weight]}</span>`;
+}
+
 // フォームのタグ入力(カンマ/読点区切り)を、トリム済み・空要素なし・重複なしの配列へ正規化
 function parseTags(v) {
   const seen = new Set();
@@ -485,6 +518,7 @@ function nextOccurrence(t) {
     repeat: t.repeat,
     estimateMinutes: t.estimateMinutes || null,
     importance: parseImportance(t.importance),
+    weight: parseWeight(t.weight),
     note: t.note || null,
     tags: [...(t.tags || [])],
   };
@@ -684,6 +718,10 @@ function applyTodoFilters(tasks) {
     const importance = Number(ui.todoFilterImportance);
     result = result.filter((t) => parseImportance(t.importance) === importance);
   }
+  if (ui.todoFilterWeight !== '') {
+    const weight = Number(ui.todoFilterWeight);
+    result = result.filter((t) => parseWeight(t.weight) === weight);
+  }
   if (ui.todoFilterMonth) {
     const monthStart = `${ui.todoFilterMonth}-01`;
     const monthEnd = endOfMonthStr(ui.todoFilterMonth);
@@ -709,7 +747,7 @@ function savedFilterOptions() {
   return html;
 }
 
-// Todo/カンバン両タブで共有するフィルタUI(クライアント/プロジェクト/重要度/年月/タグ+保存済みフィルター)
+// Todo/カンバン両タブで共有するフィルタUI(クライアント/プロジェクト/重要度/重さ/年月/タグ+保存済みフィルター)
 function todoFilterRow() {
   const hasTags = allTags().length > 0 || ui.todoFilterTag;
   const hasCategories = data.categories.length > 0 || ui.todoFilterCategory;
@@ -718,6 +756,7 @@ function todoFilterRow() {
     ui.todoFilterProject,
     ui.todoFilterCategory,
     ui.todoFilterImportance,
+    ui.todoFilterWeight,
     ui.todoFilterMonth,
     ui.todoFilterTag,
   ].filter(Boolean).length;
@@ -748,6 +787,9 @@ function todoFilterRow() {
       </label>` : ''}
         <label class="field"><span class="field-label">重要度</span>
         <select data-action-change="todo-importance-filter">${importanceFilterOptions(ui.todoFilterImportance)}</select>
+      </label>
+        <label class="field"><span class="field-label">重さ</span>
+        <select data-action-change="todo-weight-filter">${weightFilterOptions(ui.todoFilterWeight)}</select>
       </label>
         <label class="field"><span class="field-label">年月</span>
         <input type="month" data-action-change="todo-month-filter" value="${ui.todoFilterMonth}">
@@ -831,6 +873,7 @@ function buildHash() {
     if (ui.todoFilterClient) params.set('client', ui.todoFilterClient);
     if (ui.todoFilterProject) params.set('project', ui.todoFilterProject);
     if (ui.todoFilterImportance !== '') params.set('importance', ui.todoFilterImportance);
+    if (ui.todoFilterWeight !== '') params.set('weight', ui.todoFilterWeight);
     if (ui.todoFilterMonth) params.set('month', ui.todoFilterMonth);
     if (ui.todoFilterTag) params.set('tag', ui.todoFilterTag);
     if (ui.todoFilterCategory) params.set('category', ui.todoFilterCategory);
@@ -862,10 +905,12 @@ function applyHash() {
     const clientId = params.get('client') || '';
     const projectId = params.get('project') || '';
     const importance = params.get('importance');
+    const weight = params.get('weight');
     const month = params.get('month') || '';
     ui.todoFilterClient = clientById(clientId) ? clientId : '';
     ui.todoFilterProject = projectById(projectId) ? projectId : '';
     ui.todoFilterImportance = ['0', '1', '2', '3'].includes(importance) ? importance : '';
+    ui.todoFilterWeight = ['0', '1', '2', '3'].includes(weight) ? weight : '';
     ui.todoFilterMonth = HASH_MONTH_RE.test(month) ? month : '';
     const tag = params.get('tag') || '';
     ui.todoFilterTag = data.tasks.some((t) => (t.tags || []).includes(tag)) ? tag : '';
@@ -1025,6 +1070,7 @@ function renderTodo() {
                 ${timeSelect('plannedEndTime', t.plannedEndTime || '')}
               </span>
               <select name="importance" aria-label="重要度">${importanceOptions(t.importance)}</select>
+              <select name="weight" aria-label="重さ">${weightOptions(t.weight)}</select>
               <select name="repeat" aria-label="タスク種別">${repeatOptions(t.repeat || '')}</select>
               <span class="estimate-input">見積
                 <input type="number" name="estimateMinutes" min="0" value="${t.estimateMinutes || ''}" placeholder="--" aria-label="見積時間（分）">分
@@ -1074,6 +1120,7 @@ function renderTodo() {
             ${projectChip(t.projectId)}
             ${categoryChip(t)}
             ${importanceChip(t)}
+            ${weightChip(t)}
             ${planChip(t)}
             ${repeatChip(t)}
             ${tagChips(t)}
@@ -1180,6 +1227,9 @@ function renderTodo() {
             <label class="field"><span class="field-label">重要度</span>
               <select name="importance">${importanceOptions(0)}</select>
             </label>
+            <label class="field"><span class="field-label">重さ</span>
+              <select name="weight">${weightOptions(0)}</select>
+            </label>
             <label class="field"><span class="field-label">タスク種別</span>
               <select name="repeat">${repeatOptions('')}</select>
             </label>
@@ -1232,6 +1282,7 @@ function kanbanCard(t) {
           ${projectChip(t.projectId)}
           ${categoryChip(t)}
           ${importanceChip(t)}
+          ${weightChip(t)}
           ${planChip(t)}
           ${tagChips(t)}
           ${subtasks.length ? `<span class="chip">☑ ${doneCount}/${subtasks.length}</span>` : ''}
@@ -2209,6 +2260,7 @@ document.addEventListener('click', (ev) => {
       ui.todoFilterProject = '';
       ui.todoFilterCategory = '';
       ui.todoFilterImportance = '';
+      ui.todoFilterWeight = '';
       ui.todoFilterMonth = '';
       ui.todoFilterTag = '';
       ui.activeFilterId = null;
@@ -2371,6 +2423,10 @@ document.addEventListener('change', (ev) => {
       ui.todoFilterImportance = el.value;
       ui.activeFilterId = null;
       break;
+    case 'todo-weight-filter':
+      ui.todoFilterWeight = el.value;
+      ui.activeFilterId = null;
+      break;
     case 'todo-month-filter':
       ui.todoFilterMonth = HASH_MONTH_RE.test(el.value) ? el.value : '';
       ui.activeFilterId = null;
@@ -2389,6 +2445,7 @@ document.addEventListener('change', (ev) => {
       ui.todoFilterClient = f ? (f.clientId || '') : '';
       ui.todoFilterProject = f ? (f.projectId || '') : '';
       ui.todoFilterImportance = f ? f.importance : '';
+      ui.todoFilterWeight = f ? (f.weight || '') : '';
       ui.todoFilterMonth = f ? f.month : '';
       ui.todoFilterTag = f ? (f.tag || '') : '';
       ui.todoFilterCategory = f ? (f.categoryId || '') : '';
@@ -2456,6 +2513,7 @@ document.addEventListener('submit', (ev) => {
         repeat: fd.get('repeat') || null,
         estimateMinutes: parseEstimate(fd.get('estimateMinutes')),
         importance: parseImportance(fd.get('importance')),
+        weight: parseWeight(fd.get('weight')),
         note: null,
         tags: parseTags(fd.get('tags')),
         subtasks: [],
@@ -2473,6 +2531,7 @@ document.addEventListener('submit', (ev) => {
       t.repeat = fd.get('repeat') || null;
       t.estimateMinutes = parseEstimate(fd.get('estimateMinutes'));
       t.importance = parseImportance(fd.get('importance'));
+      t.weight = parseWeight(fd.get('weight'));
       t.note = String(fd.get('note') || '').trim() || null;
       t.tags = parseTags(fd.get('tags'));
       Object.assign(t, planRange(fd.get('plannedStart'), fd.get('plannedEnd'), fd.get('plannedStartTime'), fd.get('plannedEndTime')));
@@ -2487,6 +2546,7 @@ document.addEventListener('submit', (ev) => {
         projectId: ui.todoFilterProject || null,
         categoryId: ui.todoFilterCategory || null,
         importance: ui.todoFilterImportance || '',
+        weight: ui.todoFilterWeight || '',
         month: ui.todoFilterMonth || '',
         tag: ui.todoFilterTag || '',
       };

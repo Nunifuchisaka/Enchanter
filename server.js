@@ -23,7 +23,8 @@ const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const REPEAT_VALUES = new Set(['daily', 'weekly', 'monthly']);
 const TASK_STATUSES = new Set(['todo', 'in_progress', 'waiting_review', 'done']);
 
-function sanitizeImportance(value) {
+// importance(重要度)/weight(重さ)共通の0-3段階バリデーション(0=指定なし)
+function sanitizeLevel(value) {
   return Number.isInteger(value) && value >= 0 && value <= 3 ? value : 0;
 }
 
@@ -81,7 +82,8 @@ function sanitizeData(d) {
         estimateMinutes: Number.isFinite(t.estimateMinutes) && t.estimateMinutes > 0
           ? Math.round(t.estimateMinutes)
           : null,
-        importance: sanitizeImportance(t.importance),
+        importance: sanitizeLevel(t.importance),
+        weight: sanitizeLevel(t.weight),
         categoryId: typeof t.categoryId === 'string' && t.categoryId ? t.categoryId : null,
         note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
         tags: sanitizeTags(t.tags),
@@ -108,6 +110,7 @@ function sanitizeData(d) {
             projectId: typeof f.projectId === 'string' ? f.projectId : null,
             categoryId: typeof f.categoryId === 'string' ? f.categoryId : null,
             importance: ['', '0', '1', '2', '3'].includes(f.importance) ? f.importance : '',
+            weight: ['', '0', '1', '2', '3'].includes(f.weight) ? f.weight : '',
             month: typeof f.month === 'string' && /^\d{4}-\d{2}$/.test(f.month) ? f.month : '',
             tag: typeof f.tag === 'string' ? f.tag.trim() : '',
           }))
