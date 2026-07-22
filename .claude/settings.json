@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./data/enchanter-data.json)"
+    ]
+  },
+  "sandbox": {
+    "filesystem": {
+      "denyRead": [
+        "./data/enchanter-data.json"
+      ]
+    }
+  }
+}
