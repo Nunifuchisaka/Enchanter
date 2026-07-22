@@ -6,7 +6,7 @@
 
 ### 方法1: Node.jsで起動(推奨・依存パッケージなし)
 
-Windowsは `start.cmd`、Mac/Linuxは `start.sh` をダブルクリック(または実行)するだけです。サーバーが起動し、ブラウザで http://localhost:8787 が開きます。
+Windowsは `start.cmd`、Mac/Linuxは `start.command` をダブルクリック(または実行)するだけです。サーバーが起動し、ブラウザで http://localhost:8787 が開きます。
 
 コマンドで起動する場合:
 
@@ -21,6 +21,24 @@ docker compose up -d
 ```
 
 http://localhost:8787 を開いてください。データは `./data` フォルダにマウントされ、コンテナを消しても残ります。
+
+### 方法3: ログイン時に自動起動(Mac, LaunchAgent)
+
+Macにログインするたびにバックグラウンドでサーバーを自動起動しておきたい場合は、launchdのLaunchAgentを使えます。ブラウザは自動で開かないので、使いたいときに手動で http://localhost:8787 にアクセスしてください。
+
+```
+bash mac/install-launchagent.sh
+```
+
+`~/Library/LaunchAgents/com.enchanter.server.plist` を作成・登録し、即座に起動します。ログは `~/Library/Logs/Enchanter/` に出力されます。
+
+止めたい場合は次のスクリプトを実行してください:
+
+```
+bash mac/uninstall-launchagent.sh
+```
+
+> **注意:** このLaunchAgentは `KeepAlive` 設定によりプロセスが終了するたびに自動で再起動します(`kill` コマンド等で普通に終了させても再起動してしまいます)。完全に停止したい場合は必ず上記のアンインストールスクリプトを使ってください。
 
 > **注意:** `index.html` を直接ダブルクリックしても動きません(ファイル保存にサーバーが必要なため)。必ず上記の方法で起動してください。
 
@@ -64,8 +82,9 @@ http://localhost:8787 を開いてください。データは `./data` フォル
 | `style.css` | スタイル(ライト/ダークテーマ自動対応) |
 | `app.js` | アプリ本体(バニラJS、依存なし) |
 | `start.cmd` | Windows用起動スクリプト |
-| `start.sh` | Mac/Linux用起動スクリプト |
+| `start.command` | Mac/Linux用起動スクリプト |
 | `Dockerfile` / `compose.yaml` | Docker起動用 |
+| `mac/install-launchagent.sh` / `mac/uninstall-launchagent.sh` | Mac用ログイン時自動起動(LaunchAgent)の登録/解除スクリプト |
 
 ## API
 
