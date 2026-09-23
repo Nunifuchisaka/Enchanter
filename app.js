@@ -823,6 +823,7 @@ function nextTaskStatus(status) {
 function setTaskStatus(t, status) {
   if (!TASK_STATUS_ORDER.includes(status) || t.status === status) return false;
   t.status = status;
+  t.kanbanOrder = null;
   if (status === 'done') {
     t.completedAt = Date.now();
     const r = runningEntryForTask(t.id);
@@ -1114,7 +1115,7 @@ function renderTodo() {
           aria-label="ステータス: ${TASK_STATUS_LABELS[t.status]}(クリックで次の状態へ)"
           title="クリックで状態を切り替え(未着手 → 作業中 → 作業済み → 完了)"></button>
         <div class="task-main">
-          <div class="task-title">${esc(t.title)}</div>
+          <button type="button" class="task-title" data-action="edit-task" data-id="${t.id}" title="タスク名を変更" aria-label="${esc(t.title)}のタスク名を変更">${esc(t.title)}</button>
           ${t.note ? `<div class="task-note">${esc(t.note)}</div>` : ''}
           <div class="task-meta">
             ${projectChip(t.projectId)}
@@ -1265,6 +1266,34 @@ function renderTodo() {
 
 const KANBAN_DONE_LIMIT = 20;
 
+function compareKanbanTasks(a, b) {
+  const orderA = Number.isFinite(a.kanbanOrder) ? a.kanbanOrder : Infinity;
+  const orderB = Number.isFinite(b.kanbanOrder) ? b.kanbanOrder : Infinity;
+  if (orderA !== orderB) return orderA - orderB;
+  return a.status === 'done'
+    ? (b.completedAt || 0) - (a.completedAt || 0)
+    : compareActiveTasks(a, b);
+}
+
+function kanbanDropPosition(column, taskId, y) {
+  const cards = [...column.querySelectorAll('.kanban-card')].filter((card) => card.dataset.id !== taskId);
+  const before = cards.find((card) => {
+    const rect = card.getBoundingClientRect();
+    return y < rect.top + rect.height / 2;
+  });
+  return { before, after: before ? null : cards[cards.length - 1] };
+}
+
+function reorderKanbanTask(task, status, beforeId, afterId) {
+  const tasks = data.tasks.filter((t) => t.status === status && t.id !== task.id).sort(compareKanbanTasks);
+  let index = beforeId ? tasks.findIndex((t) => t.id === beforeId) : -1;
+  if (index < 0 && afterId) index = tasks.findIndex((t) => t.id === afterId) + 1;
+  if (index < 0) index = tasks.length;
+  setTaskStatus(task, status);
+  tasks.splice(index, 0, task);
+  tasks.forEach((t, order) => { t.kanbanOrder = order; });
+}
+
 function kanbanCard(t) {
   const subtasks = t.subtasks || [];
   const doneCount = subtasks.filter((s) => s.done).length;
@@ -1295,10 +1324,10 @@ function kanbanCard(t) {
 function renderKanban() {
   const tasks = applyTodoFilters(data.tasks);
   const byStatus = {
-    todo: tasks.filter((t) => t.status === 'todo').sort(compareActiveTasks),
-    in_progress: tasks.filter((t) => t.status === 'in_progress').sort(compareActiveTasks),
-    waiting_review: tasks.filter((t) => t.status === 'waiting_review').sort(compareActiveTasks),
-    done: tasks.filter((t) => t.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)),
+    todo: tasks.filter((t) => t.status === 'todo').sort(compareKanbanTasks),
+    in_progress: tasks.filter((t) => t.status === 'in_progress').sort(compareKanbanTasks),
+    waiting_review: tasks.filter((t) => t.status === 'waiting_review').sort(compareKanbanTasks),
+    done: tasks.filter((t) => t.status === 'done').sort(compareKanbanTasks),
   };
 
   const columns = TASK_STATUS_ORDER.map((status) => {
@@ -1320,11 +1349,11 @@ function renderKanban() {
           <span class="section-eyebrow">Board</span>
           <h2>カンバンボード</h2>
         </div>
-        <span class="task-overview">ドラッグしてステータスを変更</span>
+        <span class="task-overview">ドラッグして並び順・ステータスを変更</span>
       </div>
       ${todoFilterRow()}
       <div class="kanban-board">${columns}</div>
-      ${byStatus.done.length > KANBAN_DONE_LIMIT ? `<p class="kanban-limit-note">完了は新しい${KANBAN_DONE_LIMIT}件を表示しています（全${byStatus.done.length}件）</p>` : ''}
+      ${byStatus.done.length > KANBAN_DONE_LIMIT ? `<p class="kanban-limit-note">完了は先頭${KANBAN_DONE_LIMIT}件を表示しています（全${byStatus.done.length}件）</p>` : ''}
     </div>`;
 }
 
@@ -1476,9 +1505,9 @@ function renderTimeline() {
       ${activeTasks.length ? `
         <form class="add-form" data-action-submit="add-entry">
           <select name="taskId" aria-label="タスク" required>${taskOpts}</select>
-          ${timeSelect('start', '', { required: true })}
+          <input type="time" name="start" step="60" aria-label="開始時刻" required>
           〜
-          ${timeSelect('end', '', { required: true })}
+          <input type="time" name="end" step="60" aria-label="終了時刻" required>
           <button class="btn btn-primary" type="submit">追加</button>
         </form>
         <p class="task-meta" style="margin-top:8px">※ 上で選択中の日付(${fmtDateJa(ui.timelineDate)})に追加されます。終了が開始より前の場合は翌日扱いになります。</p>
@@ -2277,7 +2306,9 @@ document.addEventListener('click', (ev) => {
     case 'edit-task':
       clearEditing();
       ui.editingTask = id;
-      break;
+      renderAll();
+      document.querySelector('[data-action-submit="save-task"] input[name="title"]')?.focus();
+      return;
     case 'cycle-status': {
       const t = taskById(id);
       if (!t) return;
@@ -2719,6 +2750,14 @@ document.addEventListener('pointermove', (ev) => {
       kanbanDrag.el.style.transform = `translate(${dx}px, ${dy}px)`;
       const target = document.elementFromPoint(ev.clientX, ev.clientY);
       const column = target ? target.closest('.kanban-column') : null;
+      document.querySelectorAll('.kanban-insert-before, .kanban-insert-after').forEach((card) => {
+        card.classList.remove('kanban-insert-before', 'kanban-insert-after');
+      });
+      if (column) {
+        const { before, after } = kanbanDropPosition(column, kanbanDrag.taskId, ev.clientY);
+        if (before) before.classList.add('kanban-insert-before');
+        if (after) after.classList.add('kanban-insert-after');
+      }
       if (column !== kanbanDrag.overColumn) {
         if (kanbanDrag.overColumn) kanbanDrag.overColumn.classList.remove('drop-target');
         if (column) column.classList.add('drop-target');
@@ -2784,22 +2823,26 @@ function finishGanttDrag(ev, commit) {
 function finishKanbanDrag(ev, commit) {
   if (!kanbanDrag || ev.pointerId !== kanbanDrag.pointerId) return;
   const drag = kanbanDrag;
+  // カードがヒットテスト対象に戻る前に、背後のドロップ先を確定する。
+  const target = commit && drag.started ? document.elementFromPoint(ev.clientX, ev.clientY) : null;
+  const column = target ? target.closest('.kanban-column') : null;
+  const position = column ? kanbanDropPosition(column, drag.taskId, ev.clientY) : null;
+  document.querySelectorAll('.kanban-insert-before, .kanban-insert-after').forEach((card) => {
+    card.classList.remove('kanban-insert-before', 'kanban-insert-after');
+  });
   kanbanDrag = null;
   drag.el.classList.remove('dragging');
   drag.el.style.transform = '';
   if (drag.overColumn) drag.overColumn.classList.remove('drop-target');
   if (drag.el.hasPointerCapture(drag.pointerId)) drag.el.releasePointerCapture(drag.pointerId);
   if (!commit || !drag.started) return;
-  const target = document.elementFromPoint(ev.clientX, ev.clientY);
-  const column = target ? target.closest('.kanban-column') : null;
   if (!column) return;
   const newStatus = column.dataset.status;
   const t = taskById(drag.taskId);
   if (!t) return;
-  if (setTaskStatus(t, newStatus)) {
-    save();
-    renderAll();
-  }
+  reorderKanbanTask(t, newStatus, position.before?.dataset.id, position.after?.dataset.id);
+  save();
+  renderAll();
 }
 
 document.addEventListener('pointerup', (ev) => { finishKanbanDrag(ev, true); finishGanttDrag(ev, true); });

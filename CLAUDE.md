@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+常に日本語で応答する。
+
 ## これは何か
 
 Enchanterは、セルフホスト・単一ユーザー向けのタスク/時間管理ツール(Todo管理 + 作業時間計測)です。ビルド不要・フレームワーク不使用・依存パッケージなしのバニラJS SPAで、依存パッケージなしの小さなNode HTTPサーバーがすべてを1つのJSONファイルに永続化します。

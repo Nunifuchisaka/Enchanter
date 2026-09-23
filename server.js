@@ -84,6 +84,7 @@ function sanitizeData(d) {
           : null,
         importance: sanitizeLevel(t.importance),
         weight: sanitizeLevel(t.weight),
+        kanbanOrder: Number.isSafeInteger(t.kanbanOrder) && t.kanbanOrder >= 0 ? t.kanbanOrder : null,
         categoryId: typeof t.categoryId === 'string' && t.categoryId ? t.categoryId : null,
         note: typeof t.note === 'string' && t.note !== '' ? t.note : null,
         tags: sanitizeTags(t.tags),

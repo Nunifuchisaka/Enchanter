@@ -748,10 +748,21 @@ fieldset.field {
 }
 
 .task-title {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.45;
   word-break: break-word;
+}
+
+.task-title:hover {
+  text-decoration: underline;
 }
 
 .task-item.done .task-title {
@@ -1309,11 +1320,20 @@ details.done-section > summary {
 }
 
 .kanban-card.dragging {
+  transition: none;
   cursor: grabbing;
   opacity: 0.85;
   position: relative;
   z-index: 5;
   pointer-events: none;
+}
+
+.kanban-card.kanban-insert-before {
+  border-top: 3px solid var(--accent);
+}
+
+.kanban-card.kanban-insert-after {
+  border-bottom: 3px solid var(--accent);
 }
 
 .kanban-card.due-today {
