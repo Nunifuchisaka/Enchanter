@@ -74,6 +74,7 @@ function sanitizeData(d) {
       return {
         ...rest,
         status,
+        todayDate: typeof t.todayDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.todayDate) ? t.todayDate : null,
         completedAt: status === 'done'
           ? (Number.isFinite(t.completedAt) ? t.completedAt : Date.now())
           : null,
@@ -114,6 +115,7 @@ function sanitizeData(d) {
             weight: ['', '0', '1', '2', '3'].includes(f.weight) ? f.weight : '',
             month: typeof f.month === 'string' && /^\d{4}-\d{2}$/.test(f.month) ? f.month : '',
             tag: typeof f.tag === 'string' ? f.tag.trim() : '',
+            search: typeof f.search === 'string' ? f.search : '',
           }))
       : [],
   };
@@ -148,6 +150,20 @@ function readData() {
 // 一時ファイルに書いてからリネームすることで、書き込み中のクラッシュでも
 // 既存データが壊れないようにする
 function writeData(obj) {
+  // 各日の最初の変更前データを保持する。認証情報はバックアップしない。
+  if (fs.existsSync(DATA_FILE)) {
+    const backupDir = path.join(DATA_DIR, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    const now = new Date();
+    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const backupFile = path.join(backupDir, `enchanter-${day}.json`);
+    if (!fs.existsSync(backupFile)) {
+      const previous = fs.readFileSync(DATA_FILE, 'utf8');
+      JSON.parse(previous);
+      fs.writeFileSync(backupFile + '.tmp', previous);
+      fs.renameSync(backupFile + '.tmp', backupFile);
+    }
+  }
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
   fs.renameSync(tmp, DATA_FILE);

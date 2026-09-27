@@ -30,6 +30,7 @@ const ui = {
   aggFrom: toDateStr(startOfWeek(new Date())),
   aggTo: toDateStr(new Date()),
   todoFilterClient: '',
+  todoSearch: '',
   todoFilterProject: '',
   todoFilterImportance: '',
   todoFilterWeight: '',
@@ -48,6 +49,24 @@ const ui = {
 let ganttDrag = null;
 let lastGanttDragUndo = null;
 let kanbanDrag = null;
+const deletionHistory = [];
+
+function rememberDeletion(tasks, entries) {
+  deletionHistory.push(structuredClone({ tasks, entries }));
+  if (deletionHistory.length > 20) deletionHistory.shift();
+}
+
+function undoDeletion() {
+  const removed = deletionHistory.pop();
+  if (!removed) return;
+  data.tasks.push(...removed.tasks.filter((t) => !taskById(t.id)));
+  for (const entry of removed.entries) {
+    if (entryById(entry.id) || !taskById(entry.taskId)) continue;
+    if (entry.end === null && runningEntryForTask(entry.taskId)) entry.end = Date.now();
+    data.entries.push(entry);
+  }
+  save();
+}
 
 function normalize(d) {
   return {
@@ -560,6 +579,7 @@ function deleteTask(id) {
     ? `このタスクと ${count} 件の作業記録を削除します。よろしいですか?`
     : 'このタスクを削除します。よろしいですか?';
   if (!confirm(msg)) return;
+  rememberDeletion(data.tasks.filter((t) => t.id === id), data.entries.filter((e) => e.taskId === id));
   data.tasks = data.tasks.filter((t) => t.id !== id);
   data.entries = data.entries.filter((e) => e.taskId !== id);
   save();
@@ -705,6 +725,11 @@ function compareActiveTasks(a, b) {
 // ui.todoFilter*(クライアント/プロジェクト/重要度/年月/タグ)でタスクを絞り込む。Todo/カンバン両タブで共有
 function applyTodoFilters(tasks) {
   let result = tasks;
+  const words = ui.todoSearch.normalize('NFKC').toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (words.length) result = result.filter((t) => {
+    const text = [t.title, t.note, ...(t.tags || [])].join(' ').normalize('NFKC').toLocaleLowerCase();
+    return words.every((word) => text.includes(word));
+  });
   if (ui.todoFilterClient) {
     result = result.filter((t) => {
       const project = projectById(t.projectId);
@@ -752,6 +777,7 @@ function todoFilterRow() {
   const hasTags = allTags().length > 0 || ui.todoFilterTag;
   const hasCategories = data.categories.length > 0 || ui.todoFilterCategory;
   const filterCount = [
+    ui.todoSearch,
     ui.todoFilterClient,
     ui.todoFilterProject,
     ui.todoFilterCategory,
@@ -773,6 +799,9 @@ function todoFilterRow() {
       </summary>
       <div class="filter-panel-content">
         <div class="filter-grid">
+        <label class="field"><span class="field-label">検索（完了済みも対象）</span>
+          <input type="search" value="${esc(ui.todoSearch)}" data-action-change="todo-search" placeholder="タスク名・メモ・タグ">
+        </label>
         <label class="field"><span class="field-label">保存済み</span>
         <select data-action-change="apply-saved-filter">${savedFilterOptions()}</select>
       </label>
@@ -871,6 +900,7 @@ function endOfMonthStr(monthStr) {
 function buildHash() {
   const params = new URLSearchParams();
   if (ui.tab === 'todo' || ui.tab === 'kanban') {
+    if (ui.todoSearch) params.set('q', ui.todoSearch);
     if (ui.todoFilterClient) params.set('client', ui.todoFilterClient);
     if (ui.todoFilterProject) params.set('project', ui.todoFilterProject);
     if (ui.todoFilterImportance !== '') params.set('importance', ui.todoFilterImportance);
@@ -903,6 +933,7 @@ function applyHash() {
   const params = new URLSearchParams(qs || '');
   const date = params.get('date');
   if (tab === 'todo' || tab === 'kanban') {
+    ui.todoSearch = params.get('q') || '';
     const clientId = params.get('client') || '';
     const projectId = params.get('project') || '';
     const importance = params.get('importance');
@@ -964,7 +995,7 @@ function renderAll() {
     else b.removeAttribute('aria-current');
   });
   const view = document.getElementById('view');
-  view.classList.toggle('view-wide', ui.tab === 'gantt' || ui.tab === 'kanban');
+  view.classList.toggle('view-wide', ui.tab === 'todo' || ui.tab === 'gantt' || ui.tab === 'kanban');
   view.classList.toggle('view-kanban', ui.tab === 'kanban');
   if (ui.tab === 'todo') view.innerHTML = renderTodo();
   else if (ui.tab === 'kanban') view.innerHTML = renderKanban();
@@ -978,6 +1009,10 @@ function renderAll() {
       detail.open = detailStates.get(detail.dataset.detailsKey);
     }
   });
+  if (ui.tab === 'todo' && ui.todoSearch.trim()) {
+    const doneSection = view.querySelector('[data-details-key="done-tasks"]');
+    if (doneSection) doneSection.open = true;
+  }
   if (focusState) {
     const candidates = [...view.querySelectorAll(`[data-action-change="${focusState.action}"]`)];
     const nextFocus = candidates.find((candidate) =>
@@ -987,6 +1022,9 @@ function renderAll() {
     if (nextFocus) nextFocus.focus({ preventScroll: true });
   }
 
+  if (deletionHistory.length) {
+    view.insertAdjacentHTML('afterbegin', '<div class="undo-banner" role="status">削除を取り消せます（ページを開いている間、最大20件） <button class="btn" data-action="undo-delete">直前の削除を取り消す</button></div>');
+  }
   // 全ての状態変更はここを通るので、URLへの反映はこの1箇所だけでよい
   // (replaceStateはhashchangeを発火しないのでループしない)
   history.replaceState(null, '', location.pathname + location.search + buildHash());
@@ -1006,13 +1044,21 @@ function renderRunningBox() {
       ? `<span class="running-project"><span class="chip-dot" style="background:${esc(project.color)}"></span>${esc(project.name)}</span>`
       : '';
     return `
-      <span class="running-inner">
+      <div class="running-inner">
         <span class="running-dot"></span>
         <span class="running-task">${esc(task ? task.title : '(削除済みタスク)')}</span>
         ${projectHtml}
+        <span class="timer-warning" data-warning-since="${r.start}" ${Date.now() - r.start < 8 * 3600000 ? 'hidden' : ''}>8時間以上計測中・止め忘れを確認</span>
+        <details class="stop-at-details">
+          <summary>終了日時を指定</summary>
+          <form class="stop-at-form" data-action-submit="stop-at" data-id="${esc(r.id)}">
+          <label>終了日時 <input type="datetime-local" name="end" step="60" required aria-label="終了日時を指定"></label>
+          <button class="btn" type="submit">指定して停止</button>
+          </form>
+        </details>
         <span class="running-elapsed" data-live-since="${r.start}">${fmtClock(Date.now() - r.start)}</span>
         <button class="btn-icon danger" data-action="stop-timer" data-id="${r.id}" title="計測を停止" aria-label="${esc(task ? task.title : 'タスク')}の計測を停止">■</button>
-      </span>`;
+      </div>`;
   }).join('');
   const stopAll = running.length > 1
     ? '<button class="btn btn-quiet danger" data-action="stop-all-timers">すべて停止</button>'
@@ -1131,6 +1177,7 @@ function renderTodo() {
         </div>
         <div class="task-actions">
           ${timerBtn}
+          ${t.status !== 'done' ? `<button class="btn" data-action="toggle-today" data-id="${esc(t.id)}" aria-pressed="${t.todayDate === toDateStr(new Date())}">${t.todayDate === toDateStr(new Date()) ? '★ 今日やる' : '☆ 今日やる'}</button>` : ''}
           <button class="btn-icon" data-action="edit-task" data-id="${t.id}" title="タスクを編集" aria-label="${esc(t.title)}を編集">✎</button>
           <button class="btn-icon danger" data-action="del-task" data-id="${t.id}" title="タスクを削除" aria-label="${esc(t.title)}を削除">🗑</button>
         </div>
@@ -1143,18 +1190,28 @@ function renderTodo() {
   const waitingReview = tasks.filter((t) => t.status === 'waiting_review').sort(compareActiveTasks);
   const done = tasks.filter((t) => t.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
   const activeTasks = [...active, ...inProgress, ...waitingReview];
+  const todayTasks = activeTasks.filter((t) => t.todayDate === toDateStr(new Date(now)));
+  const remainingTasks = activeTasks.filter((t) => !todayTasks.includes(t));
+  const isUpcoming = (t) => t.plannedStart &&
+    timeToTs(fromDateStr(t.plannedStart).getTime(), t.plannedStartTime || '00:00') > now;
   const taskGroups = [
     {
       key: 'limited',
       title: '限定的なタスク',
       description: '今取り組んで消化するタスク',
-      tasks: activeTasks.filter((t) => !t.repeat),
+      tasks: remainingTasks.filter((t) => !t.repeat && !isUpcoming(t)),
+    },
+    {
+      key: 'upcoming',
+      title: '開始前のタスク',
+      description: '予定の開始日時をまだ迎えていないタスク',
+      tasks: remainingTasks.filter((t) => !t.repeat && isUpcoming(t)),
     },
     {
       key: 'recurring',
       title: '恒常的なタスク',
       description: '繰り返し取り組むタスク',
-      tasks: activeTasks.filter((t) => t.repeat),
+      tasks: remainingTasks.filter((t) => t.repeat),
     },
   ];
   const renderTaskGroup = (group) => {
@@ -1253,9 +1310,15 @@ function renderTodo() {
         <span class="task-overview">${active.length + inProgress.length + waitingReview.length}件の進行中タスク</span>
       </div>
       ${todoFilterRow()}
-      ${taskGroups.map(renderTaskGroup).join('')}
+      <div class="todo-columns">
+        <div class="todo-column">
+          ${renderTaskGroup({ key: 'today', title: '今日やる', description: '今日取り組むタスクを★で指定', tasks: todayTasks })}
+          ${renderTaskGroup(taskGroups[0])}
+        </div>
+        <div class="todo-column">${taskGroups.slice(1).map(renderTaskGroup).join('')}</div>
+      </div>
       ${done.length ? `
-        <details class="done-section" data-details-key="done-tasks">
+        <details class="done-section" data-details-key="done-tasks"${ui.todoSearch ? ' open' : ''}>
           <summary><span class="status-dot status-done"></span>完了済み <span class="section-count">${done.length}</span></summary>
           <ul class="task-list">${done.map(taskRow).join('')}</ul>
         </details>` : ''}
@@ -1447,38 +1510,39 @@ function renderTimeline() {
 
   const sortedItems = [...items].sort((a, b) => a.start - b.start);
   const entryRow = (e) => {
-    if (ui.editingEntry === e.id) {
-      return `
-        <li class="entry-item">
-          <form class="edit-form" data-action-submit="save-entry" data-id="${e.id}">
-            ${timeSelect('start', toTimeStr(e.clipStart), { required: true })}
-            〜
-            ${timeSelect('end', e.end === null ? '' : toTimeStr(e.clipEnd), { required: e.end !== null, disabled: e.end === null })}
-            <button class="btn btn-primary" type="submit">保存</button>
-            <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
-          </form>
-        </li>`;
-    }
     const task = taskById(e.taskId);
     return `
       <li class="entry-item">
-        <span class="entry-time">${fmtTime(e.clipStart)} 〜 ${e.end === null ? '計測中' : fmtTime(e.effEnd)}</span>
-        <span class="entry-dur">${fmtDur(e.clipEnd - e.clipStart)}</span>
-        <span class="entry-task">${esc(task ? task.title : '(削除済みタスク)')} ${projectChip(task ? task.projectId : null)}</span>
-        <span class="task-actions">
-          <button class="btn-icon" data-action="edit-entry" data-id="${e.id}" title="作業記録を編集" aria-label="${esc(task ? task.title : '削除済みタスク')}の作業記録を編集">✎</button>
-          <button class="btn-icon danger" data-action="del-entry" data-id="${e.id}" title="作業記録を削除" aria-label="${esc(task ? task.title : '削除済みタスク')}の作業記録を削除">🗑</button>
-        </span>
+        <form class="edit-form timeline-entry-form" data-action-submit="save-entry" data-id="${esc(e.id)}">
+          <span class="entry-task">${esc(task ? task.title : '(削除済みタスク)')} ${projectChip(task ? task.projectId : null)}</span>
+          <label>開始 <input type="datetime-local" name="start" step="60" value="${toDateStr(new Date(e.start))}T${toTimeStr(e.start)}" required></label>
+          ${e.end === null ? '<span class="task-meta">計測中</span>' : `<label>終了 <input type="datetime-local" name="end" step="60" value="${toDateStr(new Date(e.end))}T${toTimeStr(e.end)}" required></label>`}
+          <span class="entry-dur">${fmtDur(e.clipEnd - e.clipStart)}</span>
+          <button class="btn btn-primary" type="submit">保存</button>
+          <button class="btn-icon danger" type="button" data-action="del-entry" data-id="${esc(e.id)}" title="作業記録を削除" aria-label="${esc(task ? task.title : '削除済みタスク')}の作業記録を削除">🗑</button>
+        </form>
       </li>`;
   };
 
-  const activeTasks = data.tasks.filter((t) => t.status !== 'done');
-  const taskOpts = activeTasks
+  const taskChoices = [...data.tasks]
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map((t) => `<option value="${t.id}">${esc(t.title)}</option>`)
+    .map((t) => `<option value="${esc(t.id)}">${esc(t.title)}${t.status === 'done' ? '（完了）' : ''}</option>`)
     .join('');
 
   return `
+    <div class="card">
+      <h2>➕ 作業記録を手動追加</h2>
+      ${data.tasks.length ? `
+        <form class="add-form" data-action-submit="add-entry">
+          <select name="taskId" aria-label="タスク" required>${taskChoices}</select>
+          <input type="time" name="start" step="60" aria-label="開始時刻" required>
+          〜
+          <input type="time" name="end" step="60" aria-label="終了時刻" required>
+          <button class="btn btn-primary" type="submit">追加</button>
+        </form>
+        <p class="task-meta" style="margin-top:8px">※ 選択中の日付(${fmtDateJa(ui.timelineDate)})に追加されます。終了が開始より前の場合は翌日扱いになります。</p>
+      ` : '<p class="empty">タスクがありません。先にTodoタブでタスクを作成してください。</p>'}
+    </div>
     <div class="card">
       <div class="tl-header">
         <span class="tl-date-label">${fmtDateJa(ui.timelineDate)}</span>
@@ -1490,28 +1554,15 @@ function renderTimeline() {
       </div>
       ${summary}
       ${renderPlannedForDay(ui.timelineDate)}
+      <ul class="entry-list">
+        ${sortedItems.length ? sortedItems.map(entryRow).join('') : '<li class="empty">この日の作業記録はありません</li>'}
+      </ul>
       <div class="timeline-wrap">
         <div class="timeline">
           <div class="tl-hours">${hourLabels()}</div>
           <div class="tl-lanes" style="width:${laneCount * 136}px">${blocks}</div>
         </div>
       </div>
-      <ul class="entry-list">
-        ${sortedItems.length ? sortedItems.map(entryRow).join('') : '<li class="empty">この日の作業記録はありません</li>'}
-      </ul>
-    </div>
-    <div class="card">
-      <h2>➕ 作業記録を手動追加</h2>
-      ${activeTasks.length ? `
-        <form class="add-form" data-action-submit="add-entry">
-          <select name="taskId" aria-label="タスク" required>${taskOpts}</select>
-          <input type="time" name="start" step="60" aria-label="開始時刻" required>
-          〜
-          <input type="time" name="end" step="60" aria-label="終了時刻" required>
-          <button class="btn btn-primary" type="submit">追加</button>
-        </form>
-        <p class="task-meta" style="margin-top:8px">※ 上で選択中の日付(${fmtDateJa(ui.timelineDate)})に追加されます。終了が開始より前の場合は翌日扱いになります。</p>
-      ` : '<p class="empty">未完了のタスクがありません。先にTodoタブでタスクを作成してください。</p>'}
     </div>`;
 }
 
@@ -1776,6 +1827,7 @@ function importBackup(file) {
         + 'よろしいですか?';
       if (!confirm(msg)) return;
       data = next;
+      deletionHistory.length = 0;
       save();
       renderAll();
     } catch (e) {
@@ -2071,6 +2123,28 @@ function renderReport() {
     return `<button class="btn${active ? ' active' : ''}" data-action="quick-range" data-range="${range}" aria-pressed="${active}">${label}</button>`;
   }).join('');
 
+  const estimates = new Map();
+  const actualByTask = new Map();
+  const now = Date.now();
+  for (const entry of data.entries) {
+    actualByTask.set(entry.taskId, (actualByTask.get(entry.taskId) || 0) + entryDur(entry, now));
+  }
+  for (const task of data.tasks) {
+    if (!task.estimateMinutes) continue;
+    const pid = projectById(task.projectId) ? task.projectId : '';
+    if (!estimates.has(pid)) estimates.set(pid, { estimate: 0, actual: 0, count: 0 });
+    const row = estimates.get(pid);
+    row.estimate += task.estimateMinutes * 60000;
+    row.actual += actualByTask.get(task.id) || 0;
+    row.count++;
+  }
+  const estimateRows = [...estimates].map(([pid, row]) => `<tr>
+    <td>${esc(projectLabel(pid))}（${row.count}件）</td>
+    <td class="num">${fmtDur(row.estimate)}</td>
+    <td class="num">${fmtDur(row.actual)}</td>
+    <td class="num">${row.actual > row.estimate ? '+' : row.actual < row.estimate ? '−' : ''}${fmtDur(Math.abs(row.actual - row.estimate))}</td>
+  </tr>`).join('');
+
   return `
     <div class="card">
       <h2>📊 作業時間の集計</h2>
@@ -2098,6 +2172,13 @@ function renderReport() {
             <tbody>${rows.join('')}</tbody>
           </table>
         </div>` : '<p class="empty">この期間の作業記録はありません</p>'}
+    </div>
+    <div class="card">
+      <h2>プロジェクト別 見積と実績</h2>
+      <p class="task-meta">見積を設定したタスクのみ、全期間の累計で比較します（上の日付範囲とは独立）。未完了・繰り返しタスクも含むため、差は最終的な見積誤差とは限りません。</p>
+      ${estimateRows ? `<div class="report-table-wrap"><table class="report-table">
+        <thead><tr><th>プロジェクト</th><th>見積</th><th>実績</th><th>実績 − 見積</th></tr></thead>
+        <tbody>${estimateRows}</tbody></table></div>` : '<p class="empty">見積時間を設定したタスクがありません</p>'}
     </div>`;
 }
 
@@ -2207,6 +2288,7 @@ function renderManage() {
     <div class="card">
       <h2>💾 バックアップ</h2>
       <p class="backup-note">全データ(クライアント・プロジェクト・カテゴリ・タスク・作業記録)をJSONで書き出し/読み込みできます。インポートは現在のデータを全て置き換えます。</p>
+      <p class="backup-note">自動バックアップ：各日の最初の保存前データをサーバーのデータフォルダー内の backups/enchanter-日付.json に保持します。復元はそのファイルをインポートしてください。自動削除はしません。</p>
       <div class="backup-actions">
         <button class="btn" data-action="export-backup">⬇ エクスポート</button>
         <label class="btn file-btn" role="button" tabindex="0">⬆ インポート<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
@@ -2280,11 +2362,23 @@ document.addEventListener('click', (ev) => {
   const id = el.dataset.id;
 
   switch (action) {
+    case 'undo-delete':
+      undoDeletion();
+      break;
+    case 'toggle-today': {
+      const task = taskById(id);
+      if (!task) return;
+      const today = toDateStr(new Date());
+      task.todayDate = task.todayDate === today ? null : today;
+      save();
+      break;
+    }
     case 'tab':
       ui.tab = el.dataset.tab;
       clearEditing();
       break;
     case 'clear-todo-filters':
+      ui.todoSearch = '';
       ui.todoFilterClient = '';
       ui.todoFilterProject = '';
       ui.todoFilterCategory = '';
@@ -2335,6 +2429,7 @@ document.addEventListener('click', (ev) => {
       break;
     case 'del-entry':
       if (!confirm('この作業記録を削除します。よろしいですか?')) return;
+      rememberDeletion([], data.entries.filter((e) => e.id === id));
       data.entries = data.entries.filter((e) => e.id !== id);
       save();
       break;
@@ -2424,6 +2519,10 @@ document.addEventListener('change', (ev) => {
   const el = ev.target.closest('[data-action-change]');
   if (!el) return;
   switch (el.dataset.actionChange) {
+    case 'todo-search':
+      ui.todoSearch = el.value;
+      renderAll();
+      return;
     case 'toggle-subtask': {
       const t = taskById(el.dataset.id);
       if (!t) return;
@@ -2472,6 +2571,7 @@ document.addEventListener('change', (ev) => {
       break;
     case 'apply-saved-filter': {
       const f = el.value ? data.filters.find((x) => x.id === el.value) : null;
+      ui.todoSearch = f ? (f.search || '') : '';
       if (el.value && !f) return; // 削除済みなどで見つからない場合は何もしない
       ui.todoFilterClient = f ? (f.clientId || '') : '';
       ui.todoFilterProject = f ? (f.projectId || '') : '';
@@ -2530,6 +2630,18 @@ document.addEventListener('submit', (ev) => {
   let syncEntry = null;
 
   switch (form.dataset.actionSubmit) {
+    case 'stop-at': {
+      const entry = entryById(id);
+      if (!entry || entry.end !== null) return;
+      const end = new Date(String(fd.get('end'))).getTime();
+      if (!Number.isFinite(end) || end <= entry.start || end > Date.now()) {
+        alert('終了日時は開始より後、現在以前にしてください');
+        return;
+      }
+      entry.end = end;
+      syncEntry = entry;
+      break;
+    }
     case 'add-task': {
       const title = String(fd.get('title')).trim();
       if (!title) return;
@@ -2580,6 +2692,7 @@ document.addEventListener('submit', (ev) => {
         weight: ui.todoFilterWeight || '',
         month: ui.todoFilterMonth || '',
         tag: ui.todoFilterTag || '',
+        search: ui.todoSearch,
       };
       const existing = data.filters.find((f) => f.name === name);
       if (existing) {
@@ -2615,14 +2728,24 @@ document.addEventListener('submit', (ev) => {
     case 'save-entry': {
       const e = entryById(id);
       if (!e) return;
-      const dayStart = fromDateStr(ui.timelineDate).getTime();
-      e.start = timeToTs(dayStart, String(fd.get('start')));
-      if (e.end !== null) {
-        let end = timeToTs(dayStart, String(fd.get('end')));
-        if (end <= e.start) end += 86400000;
-        e.end = end;
-        syncEntry = e;
+      const readTime = (name, original) => {
+        const value = String(fd.get(name));
+        const currentValue = `${toDateStr(new Date(original))}T${toTimeStr(original)}`;
+        return value === currentValue ? original : new Date(value).getTime();
+      };
+      const start = readTime('start', e.start);
+      const end = e.end === null ? null : readTime('end', e.end);
+      if (!Number.isFinite(start) || (end !== null && (!Number.isFinite(end) || end <= start))) {
+        alert('終了日時は開始日時より後にしてください');
+        return;
       }
+      if (end === null && start > Date.now()) {
+        alert('開始時刻は現在時刻より前にしてください');
+        return;
+      }
+      e.start = start;
+      e.end = end;
+      if (end !== null) syncEntry = e;
       clearEditing();
       break;
     }
@@ -2938,6 +3061,9 @@ function timeToTs(dayStart, hhmm) {
 
 setInterval(() => {
   const now = Date.now();
+  document.querySelectorAll('[data-warning-since]').forEach((el) => {
+    el.hidden = now - Number(el.dataset.warningSince) < 8 * 3600000;
+  });
   document.querySelectorAll('[data-live-since]').forEach((el) => {
     el.textContent = fmtClock(now - Number(el.dataset.liveSince));
   });
