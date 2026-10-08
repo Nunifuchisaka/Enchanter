@@ -243,18 +243,21 @@ function requireCsrfHeader(req, res) {
 // リクエストボディを文字列として読み切ってから onEnd に渡す。
 // MAX_BODY を超えた場合は413を返して接続を切り、onEnd は呼ばない。
 function readBody(req, res, onEnd) {
-  let body = '';
+  const chunks = [];
+  let size = 0;
   let aborted = false;
   req.on('data', (chunk) => {
-    body += chunk;
-    if (body.length > MAX_BODY) {
+    size += chunk.length;
+    if (size > MAX_BODY) {
       aborted = true;
       sendJson(res, 413, { error: 'データが大きすぎます' });
       req.destroy();
     }
+    chunks.push(chunk);
   });
   req.on('end', () => {
-    if (!aborted) onEnd(body);
+    // チャンク境界で多バイト文字が割れるため、バイト列を結合してから文字列にする
+    if (!aborted) onEnd(Buffer.concat(chunks).toString('utf8'));
   });
 }
 
