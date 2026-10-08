@@ -1,3 +1,12 @@
+/* ============================================================
+ * Enchanter スタイルシート(プリプロセッサなし)
+ * セクション順: tokens → base → header → layout → buttons
+ *   → form fields → chips → todo → kanban → timeline → gantt
+ *   → report → manage → responsive
+ * ============================================================ */
+
+/* ---------- tokens ---------- */
+
 :root {
   color-scheme: light;
   --bg: #f7f7fb;
@@ -32,6 +41,8 @@
   --shadow-lg: 0 16px 48px rgba(41, 38, 58, 0.11);
   --focus-ring: rgba(101, 72, 216, 0.24);
   --control-height: 40px;
+  --transition-fast: 140ms ease;
+  --gantt-weekend: rgba(43, 39, 64, 0.05);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -65,8 +76,11 @@
     --shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
     --shadow-lg: 0 20px 52px rgba(0, 0, 0, 0.34);
     --focus-ring: rgba(173, 149, 255, 0.3);
+    --gantt-weekend: rgba(255, 255, 255, 0.04);
   }
 }
+
+/* ---------- base ---------- */
 
 * {
   margin: 0;
@@ -105,7 +119,7 @@ textarea {
   border-radius: var(--radius-sm);
   min-height: var(--control-height);
   padding: 8px 11px;
-  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
 
 input:hover,
@@ -288,7 +302,7 @@ input[type="radio"] {
   font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
-  transition: color 140ms ease, background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transition: color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .tab-btn:hover {
@@ -388,6 +402,8 @@ input[type="radio"] {
   padding: 18px 12px;
 }
 
+/* ---------- buttons ---------- */
+
 .btn {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -398,7 +414,7 @@ input[type="radio"] {
   font-weight: 650;
   line-height: 1.2;
   box-shadow: var(--shadow-sm);
-  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .btn:hover {
@@ -448,7 +464,7 @@ input[type="radio"] {
   padding: 0;
   border-radius: var(--radius-sm);
   font-size: 13px;
-  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
 }
 
 .btn-icon:hover {
@@ -463,7 +479,7 @@ input[type="radio"] {
   border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
 }
 
-/* ---------- todo ---------- */
+/* ---------- form fields ---------- */
 
 .field {
   min-width: 0;
@@ -495,6 +511,93 @@ fieldset.field {
 .plan-field .field-label {
   margin-bottom: 5px;
 }
+
+/* ---------- chips ---------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+.chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chip.plan-today {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chip.plan-due-today {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
+  font-weight: 700;
+}
+
+.chip.plan-overdue {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+  font-weight: 700;
+}
+
+.chip.importance-1 {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.chip.importance-2 {
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.chip.importance-3 {
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.chip.weight-1 {
+  background: var(--surface-2);
+  color: var(--text-sub);
+}
+
+.chip.weight-2 {
+  background: var(--surface-3);
+  color: var(--text-sub);
+  font-weight: 600;
+}
+
+.chip.weight-3 {
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.chip.tag-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chip.category-chip {
+  background: var(--review-soft);
+  color: var(--review);
+}
+
+/* ---------- todo ---------- */
 
 .add-form {
   display: flex;
@@ -587,7 +690,7 @@ fieldset.field {
   color: var(--text-faint);
   font-size: 18px;
   line-height: 1;
-  transition: transform 140ms ease, color 140ms ease;
+  transition: transform var(--transition-fast), color var(--transition-fast);
 }
 
 .filter-panel[open] > .filter-panel-heading {
@@ -723,7 +826,7 @@ fieldset.field {
   border: 1px solid transparent;
   border-bottom-color: var(--border);
   border-radius: var(--radius-sm);
-  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .task-item:last-child {
@@ -738,7 +841,7 @@ fieldset.field {
 }
 
 .task-item.due-today {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--warning-soft);
   box-shadow: inset 3px 0 0 var(--warning);
 }
@@ -842,88 +945,6 @@ fieldset.field {
   color: var(--text-sub);
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  border-radius: 999px;
-  padding: 2px 8px;
-  background: var(--surface-2);
-  white-space: nowrap;
-}
-
-.chip-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.chip.plan-today {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.chip.plan-due-today {
-  background: var(--warning-soft);
-  color: var(--warning);
-  border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
-  font-weight: 700;
-}
-
-.chip.plan-overdue {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
-  font-weight: 700;
-}
-
-.chip.importance-1 {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.chip.importance-2 {
-  background: var(--warning-soft);
-  color: var(--warning);
-  font-weight: 600;
-}
-
-.chip.importance-3 {
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-weight: 700;
-}
-
-.chip.weight-1 {
-  background: var(--surface-2);
-  color: var(--text-sub);
-}
-
-.chip.weight-2 {
-  background: var(--surface-3);
-  color: var(--text-sub);
-  font-weight: 600;
-}
-
-.chip.weight-3 {
-  background: var(--surface-3);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-weight: 700;
-}
-
-.chip.tag-chip {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.chip.category-chip {
-  background: var(--review-soft);
-  color: var(--review);
-}
 
 .plan-inputs {
   display: flex;
@@ -950,7 +971,7 @@ fieldset.field {
   margin-bottom: 12px;
   padding: 8px 12px;
   background: var(--surface-2);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .plan-day-label {
@@ -994,7 +1015,7 @@ fieldset.field {
   padding: 6px 14px;
   font-weight: 700;
   white-space: nowrap;
-  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
 .timer-btn.start {
@@ -1060,7 +1081,9 @@ fieldset.field {
 }
 
 .task-section + .task-section,
-.done-section {
+.done-section,
+.in-progress-section,
+.waiting-review-section {
   margin-top: 14px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
@@ -1124,13 +1147,6 @@ details.done-section > summary {
   font-size: 12px;
   font-weight: 800;
   padding: 4px 2px;
-}
-
-.in-progress-section,
-.waiting-review-section {
-  margin-top: 14px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
 }
 
 .in-progress-section .task-section-heading {
@@ -1360,7 +1376,7 @@ details.done-section > summary {
   cursor: grab;
   touch-action: none;
   user-select: none;
-  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .kanban-card:hover {
@@ -1628,10 +1644,6 @@ details.done-section > summary {
   font-size: 10px;
 }
 
-.view-toggle {
-  display: flex;
-  gap: 4px;
-}
 
 .entry-list {
   list-style: none;
@@ -1646,7 +1658,7 @@ details.done-section > summary {
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
   border-radius: var(--radius-sm);
-  transition: background 140ms ease;
+  transition: background var(--transition-fast);
 }
 
 .entry-item:hover,
@@ -1658,11 +1670,6 @@ details.done-section > summary {
   border-bottom: none;
 }
 
-.entry-time {
-  font-variant-numeric: tabular-nums;
-  color: var(--text-sub);
-  white-space: nowrap;
-}
 
 .entry-dur {
   font-weight: 600;
@@ -1677,16 +1684,6 @@ details.done-section > summary {
 }
 
 /* ---------- gantt ---------- */
-
-:root {
-  --gantt-weekend: rgba(43, 39, 64, 0.05);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --gantt-weekend: rgba(255, 255, 255, 0.04);
-  }
-}
 
 .gantt-wrap {
   overflow-x: auto;
@@ -1710,7 +1707,7 @@ details.done-section > summary {
   width: max-content;
   min-width: 100%;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
 }
 
@@ -2100,11 +2097,6 @@ details.done-section > summary {
   margin-bottom: 0;
 }
 
-@media (max-width: 720px) {
-  .manage-grid {
-    grid-template-columns: 1fr;
-  }
-}
 
 .manage-list {
   list-style: none;
@@ -2118,7 +2110,7 @@ details.done-section > summary {
   padding: 7px 6px;
   border-bottom: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  transition: background 140ms ease;
+  transition: background var(--transition-fast);
 }
 
 .manage-item:hover,
@@ -2195,11 +2187,6 @@ kbd {
 
   .create-primary.no-category {
     grid-template-columns: minmax(220px, 1fr) auto;
-  }
-
-  .create-primary .field-title,
-  .create-primary .create-submit {
-    grid-column: auto;
   }
 
   .create-primary .field-title {
