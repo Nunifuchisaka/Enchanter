@@ -1640,7 +1640,10 @@ function renderGanttDay() {
 function renderGanttWeek() {
   const days = ui.ganttDays;
   const rangeLabel = { 7: '1週間', 14: '2週間', 28: '4週間', 56: '8週間' }[days] || `${days}日間`;
-  const rowHeight = 28;
+  const LABEL_W = 160;
+  const DAY_W = 56;
+  const HEAD_H = 44;
+  const ROW_H = 32;
   const start = fromDateStr(ui.ganttStart);
   const startStr = ui.ganttStart;
   const endDate = new Date(start);
@@ -1671,42 +1674,42 @@ function renderGanttWeek() {
     for (const t of g.tasks) cols.push({ task: t, project: g.project });
   }
 
-  // 日付ラベル(縦)と背景の行
+  // 日付見出し(上段)と背景の縦ストライプ(日付ごとの列)
   const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
-  let dayLabels = '';
-  let bgRows = '';
+  let dayHeads = '';
+  let bgCols = '';
   for (let i = 0; i < days; i++) {
     const d = new Date(start);
     d.setDate(d.getDate() + i);
     const dow = d.getDay();
     const cls = `${dow === 0 || dow === 6 ? ' weekend' : ''}${toDateStr(d) === todayStr ? ' today' : ''}`;
     const label = (i === 0 || d.getDate() === 1) ? `${d.getMonth() + 1}/${d.getDate()}` : d.getDate();
-    dayLabels += `<div class="gantt-day-v${cls}" style="grid-row:${i + 2}"><span>${label}</span><span class="wd">${WEEK[dow]}</span></div>`;
-    bgRows += `<div class="gantt-grid-row${cls}" style="grid-row:${i + 2}"></div>`;
+    dayHeads += `<div class="gantt-day-v${cls}" style="grid-column:${i + 2}"><span>${label}</span><span class="wd">${WEEK[dow]}</span></div>`;
+    bgCols += `<div class="gantt-grid-row${cls}" style="grid-column:${i + 2}"></div>`;
   }
 
-  // タスク列(縦書きの見出し + 縦棒)
-  let colHeads = '';
+  // タスク行(左端の見出し + 横棒)
+  let rowLabels = '';
   let bars = '';
   cols.forEach((c, idx) => {
     const t = c.task;
-    const col = idx + 2;
+    const row = idx + 2;
     const sIdx = Math.max(dayIdx(t.plannedStart), 0);
     const eIdx = Math.min(dayIdx(t.plannedEnd), days - 1);
     const overdue = t.status === 'todo' && t.plannedEnd < todayStr;
     const cls = `${statusRowClass(t) ? ' ' + statusRowClass(t) : ''}${overdue ? ' overdue' : ''}` +
-      `${t.plannedStart < startStr ? ' clip-top' : ''}${t.plannedEnd > endStr ? ' clip-bottom' : ''}`;
+      `${t.plannedStart < startStr ? ' clip-left' : ''}${t.plannedEnd > endStr ? ' clip-right' : ''}`;
     const totalDays = dayIdx(t.plannedEnd) - dayIdx(t.plannedStart) + 1;
     const tip = `${t.title}${c.project ? ` (${c.project.name})` : ''}\n${planLabel(t)} (${totalDays}日間)` +
       `${overdue ? '\n⚠ 期限超過' : ''}${t.status === 'in_progress' ? '\n▶ 作業中' : ''}${t.status === 'waiting_review' ? '\n⏳ 作業済み(確認待ち)' : ''}${t.status === 'done' ? '\n✔ 完了' : ''}`;
-    colHeads += `
-      <div class="gantt-col-label${statusRowClass(t) ? ' ' + statusRowClass(t) : ''}" style="grid-column:${col}" title="${esc(tip)}">
+    rowLabels += `
+      <div class="gantt-col-label${statusRowClass(t) ? ' ' + statusRowClass(t) : ''}" style="grid-row:${row};line-height:${ROW_H}px" title="${esc(tip)}">
         <span class="chip-dot" style="background:${projectColor(t.projectId)}"></span>
         ${overdue ? '<span class="overdue-mark">⚠</span> ' : ''}${esc(t.title)}
         ${c.project ? `<span class="gantt-col-project">・${esc(c.project.name)}</span>` : ''}
       </div>`;
-    bars += `<div class="gantt-bar-v${cls}" style="grid-column:${col};grid-row:${sIdx + 2} / ${eIdx + 3};background:${projectColor(t.projectId)}"
-        data-action-pointer="gantt-drag" data-id="${t.id}" data-row-height="${rowHeight}"
+    bars += `<div class="gantt-bar-v${cls}" style="grid-column:${sIdx + 2} / ${eIdx + 3};grid-row:${row};background:${projectColor(t.projectId)}"
+        data-action-pointer="gantt-drag" data-id="${t.id}" data-day-width="${DAY_W}"
         title="${esc(tip)}"></div>`;
   });
 
@@ -1727,10 +1730,11 @@ function renderGanttWeek() {
       </div>
       ${cols.length ? `
         <div class="gantt-wrap">
-          <div class="gantt-v" style="grid-template-columns:64px repeat(${cols.length}, 38px);grid-template-rows:180px repeat(${days}, ${rowHeight}px)">
-            ${bgRows}
-            ${dayLabels}
-            ${colHeads}
+          <div class="gantt-v" style="grid-template-columns:${LABEL_W}px repeat(${days}, ${DAY_W}px);grid-template-rows:${HEAD_H}px repeat(${cols.length}, ${ROW_H}px)">
+            ${bgCols}
+            <div class="gantt-corner">タスク</div>
+            ${dayHeads}
+            ${rowLabels}
             ${bars}
           </div>
         </div>` : '<p class="empty">この期間に予定日程が設定されたタスクはありません。Todoタブでタスクに予定を設定してください。</p>'}
@@ -2850,7 +2854,8 @@ document.addEventListener('pointerdown', (ev) => {
     action,
     pointerId: ev.pointerId,
     startY: ev.clientY,
-    rowHeight: Number(el.dataset.rowHeight) || 28,
+    startX: ev.clientX,
+    dayWidth: Number(el.dataset.dayWidth),
     taskId: t.id,
     day: el.dataset.day || null,
     startMin: Number(el.dataset.startMin),
@@ -2894,8 +2899,8 @@ document.addEventListener('pointermove', (ev) => {
     const deltaMin = roundToStep((ev.clientY - ganttDrag.startY) / ganttDrag.minuteHeight, 5);
     ganttDrag.el.style.transform = `translateY(${deltaMin * ganttDrag.minuteHeight}px)`;
   } else {
-    const deltaDays = Math.round((ev.clientY - ganttDrag.startY) / ganttDrag.rowHeight);
-    ganttDrag.el.style.transform = `translateY(${deltaDays * ganttDrag.rowHeight}px)`;
+    const deltaDays = Math.round((ev.clientX - ganttDrag.startX) / ganttDrag.dayWidth);
+    ganttDrag.el.style.transform = `translateX(${deltaDays * ganttDrag.dayWidth}px)`;
   }
 });
 
@@ -2928,7 +2933,7 @@ function finishGanttDrag(ev, commit) {
     renderAll();
     return;
   }
-  const deltaDays = Math.round((ev.clientY - drag.startY) / drag.rowHeight);
+  const deltaDays = Math.round((ev.clientX - drag.startX) / drag.dayWidth);
   if (!deltaDays) return;
   lastGanttDragUndo = {
     taskId: t.id,

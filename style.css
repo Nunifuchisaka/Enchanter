@@ -1707,14 +1707,16 @@ details.done-section > summary {
 .gantt-v {
   display: grid;
   position: relative;
+  width: max-content;
+  min-width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-2);
 }
 
 .gantt-grid-row {
-  grid-column: 1 / -1;
-  border-top: 1px solid var(--border);
+  grid-row: 1 / -1;
+  border-left: 1px solid var(--border);
   z-index: 0;
 }
 
@@ -1727,21 +1729,16 @@ details.done-section > summary {
 }
 
 .gantt-day-v {
-  grid-column: 1;
-  position: sticky;
-  left: 0;
+  grid-row: 1;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
   font-size: 13px;
   line-height: 1;
   color: var(--text-sub);
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  border-top: 1px solid var(--border);
-  z-index: 1;
+  border-bottom: 1px solid var(--border);
 }
 
 .gantt-day-v .wd {
@@ -1753,24 +1750,41 @@ details.done-section > summary {
   font-weight: 700;
 }
 
-.gantt-col-label {
+.gantt-corner {
   grid-row: 1;
-  writing-mode: vertical-rl;
-  padding: 6px 3px;
+  grid-column: 1;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
   font-size: 13px;
-  line-height: 1.4;
+  color: var(--text-sub);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.gantt-col-label {
+  grid-column: 1;
+  position: sticky;
+  left: 0;
+  padding: 0 8px;
+  font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  z-index: 1;
+  border-right: 1px solid var(--border);
+  z-index: 3;
 }
 
 .gantt-col-label .chip-dot {
   display: inline-block;
-  margin-bottom: 4px;
+  vertical-align: middle;
+  margin-right: 4px;
 }
 
 .gantt-col-label.done {
@@ -1799,9 +1813,10 @@ details.done-section > summary {
 }
 
 .gantt-bar-v {
-  justify-self: center;
-  width: 60%;
-  min-height: 4px;
+  align-self: center;
+  height: 60%;
+  min-width: 4px;
+  margin: 0 3px;
   border-radius: 4px;
   box-shadow: var(--shadow);
   cursor: grab;
@@ -1817,7 +1832,6 @@ details.done-section > summary {
 .gantt-bar-v.dragging {
   cursor: grabbing;
   opacity: 0.85;
-  z-index: 3;
 }
 
 .gantt-bar-v.done {
@@ -1836,13 +1850,15 @@ details.done-section > summary {
   box-shadow: 0 0 0 2px var(--danger);
 }
 
-.gantt-bar-v.clip-top {
+.gantt-bar-v.clip-left {
+  margin-left: 0;
   border-top-left-radius: 0;
-  border-top-right-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
-.gantt-bar-v.clip-bottom {
-  border-bottom-left-radius: 0;
+.gantt-bar-v.clip-right {
+  margin-right: 0;
+  border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
 
