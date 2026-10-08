@@ -991,7 +991,7 @@ function planChip(task) {
       extraClass = ' plan-today';
     }
   }
-  return `<span class="chip${extraClass}">📅 ${planLabel(task)}${note}</span>`;
+  return `<span class="chip${extraClass}">📅 ${esc(planLabel(task))}${note}</span>`;
 }
 
 function repeatChip(task) {
