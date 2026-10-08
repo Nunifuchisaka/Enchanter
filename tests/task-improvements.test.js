@@ -6,6 +6,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const http = require('node:http');
+const net = require('node:net');
+const { EventEmitter } = require('node:events');
+const { spawn } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 
@@ -96,4 +100,116 @@ test('daily backups retain original data and sanitize today/search fields', () =
     assert.ok(path.basename(dir).startsWith('enchanter-test-'));
     fs.rmSync(dir, {recursive:true, force:true});
   }
+});
+
+function loadServerModule(dir) {
+  const context = vm.createContext({ require, console, Buffer, __dirname:root, process:{env:{DATA_DIR:dir}} });
+  const source = fs.readFileSync(path.join(root, 'server.js'), 'utf8').replace(/server\.listen\(PORT, HOST,[\s\S]*$/, '');
+  vm.runInContext(source, context);
+  return { context, run: (code) => vm.runInContext(code, context) };
+}
+
+test('request body split inside a multibyte character is decoded intact', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-test-'));
+  try {
+    const { context, run } = loadServerModule(dir);
+    const text = '{"title":"日本語のタスク"}';
+    const bytes = Buffer.from(text, 'utf8');
+    const cut = bytes.indexOf(Buffer.from('日')) + 1;
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    const res = { writeHead() {}, end() {} };
+    let received = null;
+    Object.assign(context, { req, res, onEnd: (body) => { received = body; } });
+    run('readBody(req, res, onEnd)');
+    req.emit('data', bytes.subarray(0, cut));
+    req.emit('data', bytes.subarray(cut));
+    req.emit('end');
+    assert.equal(received, text);
+  } finally {
+    fs.rmSync(dir, {recursive:true, force:true});
+  }
+});
+
+test('request body over the byte limit gets 413 and is not passed on', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-test-'));
+  try {
+    const { context, run } = loadServerModule(dir);
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    const res = { status: null, writeHead(status) { this.status = status; }, end() {} };
+    let called = false;
+    Object.assign(context, { req, res, onEnd: () => { called = true; } });
+    run('readBody(req, res, onEnd)');
+    req.emit('data', Buffer.alloc(run('MAX_BODY') + 1));
+    req.emit('end');
+    assert.equal(res.status, 413);
+    assert.equal(called, false);
+  } finally {
+    fs.rmSync(dir, {recursive:true, force:true});
+  }
+});
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+function httpRequest(port, { method, path: urlPath, headers = {}, body }) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method, path: urlPath, headers }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { text += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, body: text }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+async function waitForServer(port) {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try {
+      return await httpRequest(port, { method: 'GET', path: '/api/google/status' });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  throw new Error('server did not start');
+}
+
+test('sync-entry answers non-object JSON bodies with 400 and the server keeps running', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-test-'));
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(root, 'server.js')], {
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir },
+    stdio: 'ignore',
+  });
+  try {
+    await waitForServer(port);
+    const headers = { 'X-Requested-With': 'enchanter' };
+    for (const body of ['null', '[]', '1']) {
+      const response = await httpRequest(port, { method: 'POST', path: '/api/calendar/sync-entry', headers, body });
+      assert.equal(response.status, 400);
+    }
+    assert.equal((await httpRequest(port, { method: 'GET', path: '/api/google/status' })).status, 200);
+  } finally {
+    child.kill();
+    fs.rmSync(dir, {recursive:true, force:true});
+  }
+});
+
+test('todo chips escape planned times instead of inserting them as markup', () => {
+  const { run } = client();
+  run(`data.tasks = [{id:'p', title:'Planned', status:'todo', plannedStart:'2099-01-01', plannedEnd:'2099-01-01', plannedStartTime:'<img src=x onerror=alert(1)>'}];`);
+  const html = run('renderTodo()');
+  assert.ok(!html.includes('<img src=x'));
+  assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
 });
