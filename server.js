@@ -204,6 +204,12 @@ function sendJson(res, status, value) {
   res.end(body);
 }
 
+function sendInternalError(res, error) {
+  console.error('リクエストの処理中にエラーが発生しました', error);
+  if (!res.headersSent) sendJson(res, 500, { error: '内部エラーが発生しました' });
+  else res.end();
+}
+
 function sendNoContent(res) {
   res.writeHead(204);
   res.end();
@@ -475,12 +481,12 @@ function handleSyncEntryRequest(req, res) {
   readBody(req, res, (body) => {
     let payload;
     try {
-      payload = JSON.parse(body);
+      payload = parseJsonObject(body);
     } catch {
       sendJson(res, 400, { error: '不正なJSONです' });
       return;
     }
-    handleSyncEntry(payload, res);
+    handleSyncEntry(payload, res).catch((error) => sendInternalError(res, error));
   });
 }
 
@@ -500,7 +506,7 @@ function serveStatic(res, { file, type }) {
 
 // ---- ルーティング ----
 
-const server = http.createServer((req, res) => {
+function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
   // ---- API ----
@@ -527,7 +533,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === OAUTH_REDIRECT_PATH) {
-    if (allowMethod(req, res, 'GET')) handleOAuthCallback(url, res);
+    if (allowMethod(req, res, 'GET')) handleOAuthCallback(url, res).catch((error) => sendInternalError(res, error));
     return;
   }
 
@@ -550,6 +556,14 @@ const server = http.createServer((req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('Not Found');
+}
+
+const server = http.createServer((req, res) => {
+  try {
+    routeRequest(req, res);
+  } catch (error) {
+    sendInternalError(res, error);
+  }
 });
 
 server.listen(PORT, HOST, () => {
