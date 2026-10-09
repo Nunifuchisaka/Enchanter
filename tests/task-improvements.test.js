@@ -25,7 +25,7 @@ function client() {
     FormData: function(form) { return new Map(Object.entries(form.values)); },
   });
   vm.runInContext(fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/init\(\);\s*$/, ''), context);
-  vm.runInContext('save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {};', context);
+  vm.runInContext('save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {}; celebrate = () => {};', context);
   return { context, listeners, run: (code) => vm.runInContext(code, context) };
 }
 
@@ -247,4 +247,115 @@ test('gantt rows offer the same start and stop timer buttons as the todo tab', (
   assert.ok(html.includes('<button class="timer-btn stop" data-action="stop-timer" data-id="e1">'));
   assert.ok(!html.includes('data-action="start-timer" data-id="fin"'));
   assert.ok(!html.includes('data-action="start-timer" data-id="busy"'));
+});
+
+function celebrationClient() {
+  const harness = client();
+  harness.run(`globalThis.celebrated = [];
+    celebrate = (kind, origin, detail) => { celebrated.push({ kind, detail }); };
+    document.querySelectorAll = () => [];`);
+  harness.kinds = () => JSON.parse(harness.run('JSON.stringify(celebrated.map((item) => item.kind))'));
+  harness.details = () => JSON.parse(harness.run('JSON.stringify(celebrated.map((item) => item.detail))'));
+  return harness;
+}
+
+function elementFor(action, id) {
+  return { dataset: { action, id }, getBoundingClientRect: () => ({ left: 10, top: 20, width: 30, height: 40 }) };
+}
+
+function clickOn(listeners, action, id) {
+  const element = elementFor(action, id);
+  listeners.click({ target: { closest: () => element } });
+}
+
+test('start-timer celebrates once and stays silent when the task is already running', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'t', title:'T', status:'todo'}]; data.entries = [];`);
+  clickOn(listeners, 'start-timer', 't');
+  assert.deepEqual(kinds(), ['start']);
+  clickOn(listeners, 'start-timer', 't');
+  assert.deepEqual(kinds(), ['start']);
+});
+
+test('stop-timer celebrates with the elapsed time, and stop-all celebrates once for many timers', () => {
+  const { run, listeners, kinds, details } = celebrationClient();
+  run(`data.tasks = [{id:'a', title:'A', status:'in_progress'}, {id:'b', title:'B', status:'in_progress'}, {id:'c', title:'C', status:'in_progress'}];
+    data.entries = [
+      {id:'e1', taskId:'a', start: Date.now() - 60000, end: null},
+      {id:'e2', taskId:'b', start: Date.now() - 60000, end: null},
+      {id:'e3', taskId:'c', start: Date.now() - 60000, end: null}
+    ];`);
+  clickOn(listeners, 'stop-timer', 'e1');
+  assert.deepEqual(kinds(), ['stop']);
+  assert.match(details()[0], /^0:01:/);
+  clickOn(listeners, 'stop-timer', 'e1');
+  assert.deepEqual(kinds(), ['stop']);
+  clickOn(listeners, 'stop-all-timers', null);
+  assert.deepEqual(kinds(), ['stop', 'stop']);
+  assert.equal(details()[1], '2件');
+});
+
+test('completion outranks stop: cycling into done stops the timer with a complete celebration only', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'a', title:'A', status:'waiting_review'}];
+    data.entries = [{id:'e', taskId:'a', start: Date.now() - 5000, end: null}];`);
+  clickOn(listeners, 'cycle-status', 'a');
+  assert.equal(run("taskById('a').status"), 'done');
+  assert.notEqual(run("data.entries[0].end"), null);
+  assert.deepEqual(kinds(), ['complete']);
+});
+
+test('cycling through non-done states and leaving done celebrate nothing', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'a', title:'A', status:'todo'}]; data.entries = [];`);
+  clickOn(listeners, 'cycle-status', 'a');
+  clickOn(listeners, 'cycle-status', 'a');
+  assert.deepEqual(kinds(), []);
+  clickOn(listeners, 'cycle-status', 'a');
+  assert.deepEqual(kinds(), ['complete']);
+  clickOn(listeners, 'cycle-status', 'a');
+  assert.equal(run("taskById('a').status"), 'todo');
+  assert.deepEqual(kinds(), ['complete']);
+});
+
+test('kanban arrow keys celebrate only when moving into done', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'k', title:'K', status:'waiting_review'}]; data.entries = [];`);
+  const card = { dataset: { id: 'k' }, getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }) };
+  const press = (key) => listeners.keydown({
+    key, preventDefault() {},
+    target: { matches: () => false, isContentEditable: false, closest: (selector) => (selector === '.kanban-card' ? card : null) },
+  });
+  press('ArrowRight');
+  assert.deepEqual(kinds(), ['complete']);
+  press('ArrowLeft');
+  assert.equal(run("taskById('k').status"), 'waiting_review');
+  assert.deepEqual(kinds(), ['complete']);
+});
+
+test('kanban drop into done celebrates once and dropping within done does not repeat it', () => {
+  const { run, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'d', title:'D', status:'waiting_review'}]; data.entries = [];`);
+  run(`globalThis.doneColumn = { dataset: { status: 'done' }, querySelectorAll: () => [] };
+    document.elementFromPoint = () => ({ closest: (selector) => (selector === '.kanban-column' ? doneColumn : null) });`);
+  const drag = () => run(`kanbanDrag = { pointerId: 1, taskId: 'd', started: true, overColumn: null,
+    element: { classList: { remove() {} }, style: {}, hasPointerCapture: () => false, releasePointerCapture() {} } };`);
+  drag();
+  run('finishKanbanDrag({ pointerId: 1, clientX: 5, clientY: 6 }, true)');
+  assert.equal(run("taskById('d').status"), 'done');
+  assert.deepEqual(kinds(), ['complete']);
+  drag();
+  run('finishKanbanDrag({ pointerId: 1, clientX: 5, clientY: 6 }, true)');
+  assert.deepEqual(kinds(), ['complete']);
+});
+
+test('stop-at form celebrates stop only when the end time is accepted', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run("data.entries = [{id:'r', taskId:'a', start:new Date('2020-01-01T10:00').getTime(), end:null}];");
+  const form = (end) => ({ dataset: { actionSubmit: 'stop-at', id: 'r' }, values: { end },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }) });
+  listeners.submit({ target: { closest: () => form('2099-01-01T12:00') }, preventDefault() {} });
+  assert.deepEqual(kinds(), []);
+  listeners.submit({ target: { closest: () => form('2020-01-01T11:00') }, preventDefault() {} });
+  assert.deepEqual(kinds(), ['stop']);
 });

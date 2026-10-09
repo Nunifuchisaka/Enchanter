@@ -2581,3 +2581,102 @@ kbd {
     animation: none;
   }
 }
+/* ---------- celebration ---------- */
+.celebrate-layer {
+  --life: 1s;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.celebrate-flash {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: 120vmax;
+  height: 120vmax;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 60%);
+  opacity: 0;
+  animation: celebrate-flash var(--life) ease-out forwards;
+}
+
+@keyframes celebrate-flash {
+  0% { transform: translate(-50%, -50%) scale(0.2); opacity: 0; }
+  25% { transform: translate(-50%, -50%) scale(0.6); opacity: var(--peak); }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+
+.celebrate-ring {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  opacity: 0;
+  animation: celebrate-ring var(--life) cubic-bezier(0.2, 0.7, 0.2, 1) var(--delay, 0ms) forwards;
+}
+
+@keyframes celebrate-ring {
+  0% { transform: translate(-50%, -50%) scale(0.2); opacity: 0.9; }
+  100% { transform: translate(-50%, -50%) scale(9); opacity: 0; }
+}
+
+.celebrate-particle {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--size);
+  height: calc(var(--size) * 0.5);
+  border-radius: 2px;
+  background: hsl(var(--hue) 90% 60%);
+  opacity: 0;
+  animation: celebrate-particle var(--life) cubic-bezier(0.2, 0.6, 0.4, 1) var(--delay, 0ms) forwards;
+}
+
+.celebrate-particle--round {
+  height: var(--size);
+  border-radius: 50%;
+}
+
+@keyframes celebrate-particle {
+  0% { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+  5% { transform: translate(-50%, -50%) scale(0.4); opacity: 1; }
+  30% { transform: translate(-50%, -50%) translate(calc(var(--dx) * 0.7), calc(var(--dy) * 0.7)) rotate(calc(var(--rot) * 0.5)) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) translate(var(--dx), calc(var(--dy) + var(--fall))) rotate(var(--rot)); opacity: 0; }
+}
+
+.celebrate-text {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  padding: 6px 14px;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+  opacity: 0;
+  animation: celebrate-text var(--life) cubic-bezier(0.2, 0.9, 0.3, 1.2) forwards;
+}
+
+@keyframes celebrate-text {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+  12% { transform: translate(-50%, -50%) scale(1.25); opacity: 1; }
+  22% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  75% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, calc(-50% - 40px)) scale(1); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 上の全体ルール(*)より詳細度を上げ、演出だけ動きを残す */
+  .celebrate-layer,
+  .celebrate-layer * {
+    animation-duration: var(--life, 1s) !important;
+  }
+}

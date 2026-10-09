@@ -606,31 +606,38 @@ function undoDeletion() {
 }
 
 // 複数タスクの並行計測に対応(同じタスクの二重計測のみ防ぐ)
+// 計測を実際に開始したらtrueを返す(演出の発火判定に使う)
 function startTimer(taskId) {
-  if (runningEntryForTask(taskId)) return;
+  if (runningEntryForTask(taskId)) return false;
   const task = taskById(taskId);
-  if (!task) return;
+  if (!task) return false;
   if (task.status === 'todo') task.status = 'in_progress';
   data.entries.push({ id: uid(), taskId, start: Date.now(), end: null });
   save();
   renderAll();
+  return true;
 }
 
+// 実際に停止した作業記録を返す。停止していなければnull
 function stopTimer(entryId) {
   const entry = entryById(entryId);
   if (entry && entry.end === null) {
     entry.end = Date.now();
     save();
     syncEntryToGoogle(entry);
+    return entry;
   }
+  return null;
 }
 
+// 停止した作業記録の一覧を返す
 function stopAllTimers() {
   const now = Date.now();
   const stopped = runningEntries();
   stopped.forEach((entry) => { entry.end = now; });
   save();
   stopped.forEach(syncEntryToGoogle);
+  return stopped;
 }
 
 // ステータスを直接設定し、付随する副作用(完了時刻・計測停止・繰り返し次回生成)を適用する。
@@ -2554,6 +2561,89 @@ function renderManage() {
     </div>`;
 }
 
+/* ---------- celebration ---------- */
+
+// 粒子数・飛散幅・寿命(ms)。完了 > 停止 > 開始の順に派手にする
+const CELEBRATIONS = {
+  complete: { particles: 60, spread: 360, life: 1800, rings: 2, flash: 0.6, label: '完了!' },
+  stop: { particles: 30, spread: 240, life: 1400, rings: 1, flash: 0.4, label: '停止' },
+  start: { particles: 18, spread: 160, life: 1100, rings: 1, flash: 0, label: '開始' },
+};
+// 連打で演出が増え続けないよう、同時に残すのは最新の2つまで
+const CELEBRATION_MAX_LAYERS = 2;
+const CELEBRATION_CLEANUP_MARGIN = 300;
+const celebrationLayers = [];
+
+// 演出の起点は押されたボタンの中心。描画で要素が消える前に取得すること
+function centerOf(element) {
+  if (!element || !element.getBoundingClientRect) return null;
+  const rect = element.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+}
+
+function removeCelebrationLayer(item) {
+  clearTimeout(item.timer);
+  item.layer.remove();
+  const index = celebrationLayers.indexOf(item);
+  if (index >= 0) celebrationLayers.splice(index, 1);
+}
+
+// 祝福演出を body 直下のレイヤーとして出す。#view の再描画では消えない。操作は妨げない(pointer-events: none)
+function celebrate(kind, origin, detail) {
+  const config = CELEBRATIONS[kind];
+  if (!config) return;
+  while (celebrationLayers.length >= CELEBRATION_MAX_LAYERS) removeCelebrationLayer(celebrationLayers[0]);
+  const rand = (min, max) => min + Math.random() * (max - min);
+  const layer = document.createElement('div');
+  layer.className = `celebrate-layer celebrate-layer--${kind}`;
+  layer.setAttribute('aria-hidden', 'true');
+  // 画面外の起点（スクロールで隠れたボタン等）でも演出が見えるよう、画面内に丸める
+  const clampTo = (value, max) => Math.min(Math.max(value, 0), max);
+  layer.style.setProperty('--x', `${clampTo(origin ? origin.x : window.innerWidth / 2, window.innerWidth)}px`);
+  layer.style.setProperty('--y', `${clampTo(origin ? origin.y : window.innerHeight / 2, window.innerHeight)}px`);
+  layer.style.setProperty('--life', `${config.life}ms`);
+  if (config.flash) {
+    const flash = document.createElement('div');
+    flash.className = 'celebrate-flash';
+    flash.style.setProperty('--peak', String(config.flash));
+    layer.appendChild(flash);
+  }
+  for (let i = 0; i < config.rings; i++) {
+    const ring = document.createElement('div');
+    ring.className = 'celebrate-ring';
+    ring.style.setProperty('--delay', `${i * 180}ms`);
+    layer.appendChild(ring);
+  }
+  for (let i = 0; i < config.particles; i++) {
+    const piece = document.createElement('i');
+    piece.className = Math.random() < 0.4 ? 'celebrate-particle celebrate-particle--round' : 'celebrate-particle';
+    piece.style.setProperty('--dx', `${rand(-config.spread, config.spread)}px`);
+    piece.style.setProperty('--dy', `${rand(-config.spread, config.spread * 0.3)}px`);
+    piece.style.setProperty('--fall', `${rand(80, 200)}px`);
+    piece.style.setProperty('--rot', `${rand(-720, 720)}deg`);
+    piece.style.setProperty('--hue', String(Math.floor(rand(0, 360))));
+    piece.style.setProperty('--size', `${rand(6, 12)}px`);
+    piece.style.setProperty('--delay', `${rand(0, 150)}ms`);
+    piece.style.setProperty('--life', `${Math.round(config.life * rand(0.8, 1))}ms`);
+    layer.appendChild(piece);
+  }
+  const text = document.createElement('div');
+  text.className = 'celebrate-text';
+  text.textContent = detail ? `${config.label} ${detail}` : config.label;
+  layer.appendChild(text);
+  const item = { layer, timer: null };
+  item.timer = setTimeout(() => removeCelebrationLayer(item), config.life + CELEBRATION_CLEANUP_MARGIN);
+  celebrationLayers.push(item);
+  document.body.appendChild(layer);
+}
+
+// 各要素は自分のアニメーション終了時に外す(レイヤー単位の後始末はcelebrateのタイマーが担う)
+document.addEventListener('animationend', (event) => {
+  const target = event.target;
+  if (!target.closest || target.classList.contains('celebrate-layer')) return;
+  if (target.closest('.celebrate-layer')) target.remove();
+});
+
 /* ---------- events ---------- */
 
 // カンバンのドラッグ中に付けた挿入位置の目印(直前・直後のカード)を外す
@@ -2568,6 +2658,7 @@ document.addEventListener('click', (event) => {
   if (!element) return;
   const action = element.dataset.action;
   const id = element.dataset.id;
+  let celebration = null;
 
   switch (action) {
     case 'undo-delete':
@@ -2596,15 +2687,23 @@ document.addEventListener('click', (event) => {
       ui.todoFilterTag = '';
       ui.activeFilterId = null;
       break;
-    case 'start-timer':
-      startTimer(id);
+    case 'start-timer': {
+      const origin = centerOf(element);
+      if (startTimer(id)) celebrate('start', origin);
       return;
-    case 'stop-timer':
-      stopTimer(id);
+    }
+    case 'stop-timer': {
+      const origin = centerOf(element);
+      const entry = stopTimer(id);
+      if (entry) celebration = { kind: 'stop', origin, detail: fmtClock(entry.end - entry.start) };
       break;
-    case 'stop-all-timers':
-      stopAllTimers();
+    }
+    case 'stop-all-timers': {
+      const origin = centerOf(element);
+      const stopped = stopAllTimers();
+      if (stopped.length) celebration = { kind: 'stop', origin, detail: `${stopped.length}件` };
       break;
+    }
     case 'edit-task':
       clearEditing();
       ui.editingTask = id;
@@ -2614,8 +2713,11 @@ document.addEventListener('click', (event) => {
     case 'cycle-status': {
       const task = taskById(id);
       if (!task) return;
+      const origin = centerOf(element);
+      const wasDone = task.status === 'done';
       setTaskStatus(task, nextTaskStatus(task.status));
       save();
+      if (!wasDone && task.status === 'done') celebration = { kind: 'complete', origin };
       break;
     }
     case 'del-task':
@@ -2709,6 +2811,7 @@ document.addEventListener('click', (event) => {
       return;
   }
   renderAll();
+  if (celebration) celebrate(celebration.kind, celebration.origin, celebration.detail);
 });
 
 document.addEventListener('change', (event) => {
@@ -2829,6 +2932,7 @@ document.addEventListener('submit', (event) => {
   const formData = new FormData(form);
   const id = form.dataset.id;
   let syncEntry = null;
+  let celebration = null;
 
   switch (form.dataset.actionSubmit) {
     case 'stop-at': {
@@ -2841,6 +2945,7 @@ document.addEventListener('submit', (event) => {
       }
       entry.end = end;
       syncEntry = entry;
+      celebration = { kind: 'stop', origin: centerOf(form), detail: fmtClock(end - entry.start) };
       break;
     }
     case 'add-task': {
@@ -3021,6 +3126,7 @@ document.addEventListener('submit', (event) => {
   save();
   renderAll();
   if (syncEntry) syncEntryToGoogle(syncEntry);
+  if (celebration) celebrate(celebration.kind, celebration.origin, celebration.detail);
 });
 
 document.addEventListener('pointerdown', (event) => {
@@ -3152,9 +3258,11 @@ function finishKanbanDrag(event, commit) {
   if (!commit || !drag.started || !column) return;
   const task = taskById(drag.taskId);
   if (!task) return;
+  const wasDone = task.status === 'done';
   reorderKanbanTask(task, column.dataset.status, position.before?.dataset.id, position.after?.dataset.id);
   save();
   renderAll();
+  if (!wasDone && task.status === 'done') celebrate('complete', { x: event.clientX, y: event.clientY });
 }
 
 document.addEventListener('pointerup', (event) => { finishKanbanDrag(event, true); finishGanttDrag(event, true); });
@@ -3187,9 +3295,12 @@ document.addEventListener('keydown', (event) => {
     const nextIndex = currentIndex + (event.key === 'ArrowRight' ? 1 : -1);
     if (nextIndex < 0 || nextIndex >= TASK_STATUS_ORDER.length) return;
     event.preventDefault();
+    const origin = centerOf(kanbanCardTarget);
+    const wasDone = task.status === 'done';
     if (setTaskStatus(task, TASK_STATUS_ORDER[nextIndex])) {
       save();
       renderAll();
+      if (!wasDone && task.status === 'done') celebrate('complete', origin);
       const movedCard = [...document.querySelectorAll('.kanban-card')]
         .find((card) => card.dataset.id === task.id);
       const movedCardControl = movedCard ? movedCard.querySelector('.kanban-card-control') : null;
