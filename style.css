@@ -1763,9 +1763,14 @@ details.done-section > summary {
   font-size: 12px;
 }
 
+.gantt-day-v.weekend {
+  background: linear-gradient(var(--gantt-weekend), var(--gantt-weekend)), var(--surface);
+}
+
 .gantt-day-v.today {
   color: var(--accent);
   font-weight: 700;
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
 }
 
 .gantt-corner-top {
