@@ -1252,6 +1252,14 @@ function todoTaskEditRow(task) {
 }
 
 // タスク行の計測ボタン。計測中なら停止と開始時刻の編集、完了済みは出さない
+function timerStopButton(running, now) {
+  return `<button class="timer-btn stop" data-action="stop-timer" data-id="${esc(running.id)}">■ <span data-live-since="${running.start}">${fmtClock(now - running.start)}</span></button>`;
+}
+
+function timerStartButton(task) {
+  return `<button class="timer-btn start" data-action="start-timer" data-id="${esc(task.id)}">▶ 計測</button>`;
+}
+
 function todoTimerControls(task, running, now) {
   if (task.status === 'done') return '';
   if (running && ui.editingEntry === running.id) {
@@ -1266,10 +1274,10 @@ function todoTimerControls(task, running, now) {
   }
   if (running) {
     return `
-      <button class="timer-btn stop" data-action="stop-timer" data-id="${esc(running.id)}">■ <span data-live-since="${running.start}">${fmtClock(now - running.start)}</span></button>
+      ${timerStopButton(running, now)}
       <button class="btn-icon" data-action="edit-entry" data-id="${esc(running.id)}" title="開始時刻を編集" aria-label="${esc(task.title)}の開始時刻を編集">✎</button>`;
   }
-  return `<button class="timer-btn start" data-action="start-timer" data-id="${esc(task.id)}">▶ 計測</button>`;
+  return timerStartButton(task);
 }
 
 // タスク一覧の1行。編集中ならフォームに差し替える
@@ -1721,13 +1729,14 @@ function renderTimeline() {
 
 const GANTT_LABEL_WIDTH = 160;
 const GANTT_DAY_WIDTH = 56;
+const GANTT_MONTH_HEIGHT = 26;
 const GANTT_HEAD_HEIGHT = 44;
 const GANTT_ROW_HEIGHT = 32;
 
 function renderGantt() {
   return `<div class="gantt-board">
-    ${renderGanttDay()}
     ${renderGanttWeek()}
+    ${renderGanttDay()}
   </div>`;
 }
 
@@ -1829,6 +1838,25 @@ function ganttWeekColumns(startStr, endStr) {
   return columns;
 }
 
+// 週表示の月見出し(最上段)。同じ月が続く日付を1つのセルにまとめる
+function ganttWeekMonthHeadings(start, days) {
+  const runs = [];
+  for (let i = 0; i < days; i++) {
+    const date = new Date(start);
+    date.setDate(date.getDate() + i);
+    const last = runs[runs.length - 1];
+    if (last && last.year === date.getFullYear() && last.month === date.getMonth()) {
+      last.end = i + 3;
+    } else {
+      runs.push({ year: date.getFullYear(), month: date.getMonth(), begin: i + 2, end: i + 3 });
+    }
+  }
+  return runs.map((run, index) => {
+    const yearPrefix = index === 0 || run.month === 0 ? `${run.year}年` : '';
+    return `<div class="gantt-month-v" style="grid-column:${run.begin} / ${run.end};grid-row:1"><span>${esc(`${yearPrefix}${run.month + 1}月`)}</span></div>`;
+  }).join('');
+}
+
 // 週表示の日付見出し(上段)と背景の縦ストライプ(日付ごとの列)
 function ganttWeekDayHeadings(start, days, today) {
   let dayHeads = '';
@@ -1839,20 +1867,28 @@ function ganttWeekDayHeadings(start, days, today) {
     const weekday = date.getDay();
     const dayClasses = `${weekday === 0 || weekday === 6 ? ' weekend' : ''}${toDateStr(date) === today ? ' today' : ''}`;
     const label = (i === 0 || date.getDate() === 1) ? `${date.getMonth() + 1}/${date.getDate()}` : date.getDate();
-    dayHeads += `<div class="gantt-day-v${dayClasses}" style="grid-column:${i + 2}"><span>${label}</span><span class="wd">${WEEKDAY_LABELS[weekday]}</span></div>`;
+    dayHeads += `<div class="gantt-day-v${dayClasses}" style="grid-column:${i + 2};top:${GANTT_MONTH_HEIGHT}px"><span>${label}</span><span class="wd">${WEEKDAY_LABELS[weekday]}</span></div>`;
     backgroundCols += `<div class="gantt-grid-row${dayClasses}" style="grid-column:${i + 2}"></div>`;
   }
   return { dayHeads, backgroundCols };
 }
 
+// ガントの行ラベル用の計測ボタン。インライン編集フォームは行の高さに収まらないため出さない(開始時刻の編集はTodoタブで行う)
+function ganttTimerControl(task, running, now) {
+  if (task.status === 'done') return '';
+  return running ? timerStopButton(running, now) : timerStartButton(task);
+}
+
 // 週表示のタスク行(左端の見出し + 日付軸上の横棒)
 function ganttWeekRowsHtml(columns, { start, startStr, endStr, days, today }) {
   const dayIndex = (dateStr) => Math.round((fromDateStr(dateStr) - start) / MS_PER_DAY);
+  const now = Date.now();
   let rowLabels = '';
   let bars = '';
   columns.forEach((column, index) => {
     const task = column.task;
-    const row = index + 2;
+    const row = index + 3;
+    const running = runningEntryForTask(task.id);
     const startIdx = Math.max(dayIndex(task.plannedStart), 0);
     const endIdx = Math.min(dayIndex(task.plannedEnd), days - 1);
     const overdue = isOverdue(task, today);
@@ -1864,9 +1900,12 @@ function ganttWeekRowsHtml(columns, { start, startStr, endStr, days, today }) {
     const tip = `${task.title}${column.project ? ` (${column.project.name})` : ''}\n${planLabel(task)} (${totalDays}日間)${ganttTipStatus(task, overdue)}`;
     rowLabels += `
       <div class="gantt-col-label${statusSuffix}" style="grid-row:${row};line-height:${GANTT_ROW_HEIGHT}px" title="${esc(tip)}">
-        <span class="chip-dot" style="background:${projectColor(task.projectId)}"></span>
-        ${overdue ? '<span class="overdue-mark">⚠</span> ' : ''}${esc(task.title)}
-        ${column.project ? `<span class="gantt-col-project">・${esc(column.project.name)}</span>` : ''}
+        <span class="gantt-col-name">
+          <span class="chip-dot" style="background:${projectColor(task.projectId)}"></span>
+          ${overdue ? '<span class="overdue-mark">⚠</span> ' : ''}${esc(task.title)}
+          ${column.project ? `<span class="gantt-col-project">・${esc(column.project.name)}</span>` : ''}
+        </span>
+        ${ganttTimerControl(task, running, now)}
       </div>`;
     bars += `<div class="gantt-bar-v${barClasses}" style="grid-column:${startIdx + 2} / ${endIdx + 3};grid-row:${row};background:${projectColor(task.projectId)}"
         data-action-pointer="gantt-drag" data-id="${esc(task.id)}" data-day-width="${GANTT_DAY_WIDTH}"
@@ -1886,6 +1925,7 @@ function renderGanttWeek() {
   const endStr = toDateStr(endDate);
   const today = todayStr();
   const columns = ganttWeekColumns(startStr, endStr);
+  const monthHeads = ganttWeekMonthHeadings(start, days);
   const { dayHeads, backgroundCols } = ganttWeekDayHeadings(start, days, today);
   const { rowLabels, bars } = ganttWeekRowsHtml(columns, { start, startStr, endStr, days, today });
 
@@ -1906,9 +1946,11 @@ function renderGanttWeek() {
       </div>
       ${columns.length ? `
         <div class="gantt-wrap">
-          <div class="gantt-v" style="grid-template-columns:${GANTT_LABEL_WIDTH}px repeat(${days}, ${GANTT_DAY_WIDTH}px);grid-template-rows:${GANTT_HEAD_HEIGHT}px repeat(${columns.length}, ${GANTT_ROW_HEIGHT}px)">
+          <div class="gantt-v" style="grid-template-columns:${GANTT_LABEL_WIDTH}px repeat(${days}, ${GANTT_DAY_WIDTH}px);grid-template-rows:${GANTT_MONTH_HEIGHT}px ${GANTT_HEAD_HEIGHT}px repeat(${columns.length}, ${GANTT_ROW_HEIGHT}px)">
             ${backgroundCols}
-            <div class="gantt-corner">タスク</div>
+            <div class="gantt-corner-top"></div>
+            ${monthHeads}
+            <div class="gantt-corner" style="top:${GANTT_MONTH_HEIGHT}px">タスク</div>
             ${dayHeads}
             ${rowLabels}
             ${bars}

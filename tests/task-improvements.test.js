@@ -213,3 +213,38 @@ test('todo chips escape planned times instead of inserting them as markup', () =
   assert.ok(!html.includes('<img src=x'));
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
 });
+
+test('gantt shows the 4-week view above the 1-day view', () => {
+  const { run } = client();
+  run(`data.tasks = [{id:'g', title:'Gantt task', status:'todo', plannedStart:'2099-01-10', plannedEnd:'2099-01-12'}];
+    ui.ganttStart = '2099-01-05'; ui.ganttDays = 28; ui.ganttDate = '2099-01-10';`);
+  const html = run('renderGantt()');
+  assert.ok(html.indexOf('gantt-wrap') > -1);
+  assert.ok(html.indexOf('gantt-wrap') < html.indexOf('🕐 1日'));
+});
+
+test('gantt week view shows the month above the day headings', () => {
+  const { run } = client();
+  run(`data.tasks = [{id:'g', title:'Gantt task', status:'todo', plannedStart:'2099-01-30', plannedEnd:'2099-02-02'}];
+    ui.ganttStart = '2099-01-29'; ui.ganttDays = 7;`);
+  const html = run('renderGanttWeek()');
+  assert.ok(html.includes('<span>2099年1月</span>'));
+  assert.ok(html.includes('<span>2月</span>'));
+  assert.ok(html.indexOf('2099年1月') < html.indexOf('gantt-day-v'));
+});
+
+test('gantt rows offer the same start and stop timer buttons as the todo tab', () => {
+  const { run } = client();
+  run(`data.tasks = [
+    {id:'idle', title:'Idle task', status:'todo', plannedStart:'2099-01-10', plannedEnd:'2099-01-10'},
+    {id:'busy', title:'Busy task', status:'todo', plannedStart:'2099-01-10', plannedEnd:'2099-01-10'},
+    {id:'fin', title:'Finished task', status:'done', plannedStart:'2099-01-10', plannedEnd:'2099-01-10'}
+  ];
+    data.entries = [{id:'e1', taskId:'busy', start: Date.now() - 60000, end: null}];
+    ui.ganttStart = '2099-01-05'; ui.ganttDays = 28;`);
+  const html = run('renderGanttWeek()');
+  assert.ok(html.includes('<button class="timer-btn start" data-action="start-timer" data-id="idle">'));
+  assert.ok(html.includes('<button class="timer-btn stop" data-action="stop-timer" data-id="e1">'));
+  assert.ok(!html.includes('data-action="start-timer" data-id="fin"'));
+  assert.ok(!html.includes('data-action="start-timer" data-id="busy"'));
+});
