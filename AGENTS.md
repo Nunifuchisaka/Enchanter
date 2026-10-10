@@ -10,7 +10,8 @@ Enchanter is a self-hosted, single-user task/time-tracking tool (Todo管理 + �
 
 - Run the server: `node server.js` (or double-click `start.cmd` on Windows, which also opens the browser)
 - Run via Docker: `docker compose up -d`
-- No build step, no bundler, no test suite, no linter — `app.js`/`style.css`/`index.html` are served as-is.
+- No build step, no bundler, no linter — `app.js`/`style.css`/`index.html` are served as-is.
+- Tests: `node --test tests/task-improvements.test.js` (Node's built-in `node:test`, no dependencies).
 - Default port `8787`; override with `PORT` env var. Data directory defaults to `./data`; override with `DATA_DIR` env var. Bind address defaults to `127.0.0.1` (loopback-only, since there's no auth); override with `HOST` env var to expose on the LAN.
 - The app **must** be accessed via the server (`http://localhost:8787`); opening `index.html` directly (`file://`) does not work since saving requires the HTTP API, and `app.js` explicitly detects and blocks this case.
 
@@ -31,12 +32,12 @@ Four files make up the whole app, each with exactly one job:
 
 There's no login/session system — the trust boundary is "whoever can reach the port." Two mechanisms enforce that boundary and must be preserved when touching `server.js`/`app.js`:
 - Any state-changing endpoint (`PUT /api/data`, `POST /api/google/disconnect`, `POST /api/calendar/sync-entry`) requires the `X-Requested-With: enchanter` header (checked via `requireCsrfHeader()`). This forces a CORS preflight on every request regardless of method; since the server never answers `OPTIONS` or sends `Access-Control-Allow-Origin`, a browser visiting a malicious page can't trigger these endpoints (drive-by CSRF). New mutating endpoints must call `requireCsrfHeader()`, and any new `fetch()` call to them in `app.js` must send that header.
-- `PUT /api/data` (and `readData()` on load) runs the payload through `sanitizeData()`, which forces `project.color` to match `/^#[0-9a-fA-F]{6}$/`, `task.repeat` to one of `daily`/`weekly`/`monthly`/`null`, and `task.estimateMinutes` to a positive integer or `null` (`task.note` is coerced to string/`null` but otherwise passed through — it's always rendered via `esc()`). Fields like `color`/`estimateMinutes` are rendered unescaped into `style="background:..."` / `value="..."` attributes client-side, so a crafted API payload or hand-edited `data/enchanter-data.json` could otherwise break out of the attribute. Any new enum-like field rendered into an HTML attribute needs the same treatment (either server-side validation or `esc()` on the client).
+- `PUT /api/data` (and `readData()` on load) runs the payload through `sanitizeData()`, which forces `project.color` to match `/^#[0-9a-fA-F]{6}$/`, `task.repeat` to one of `daily`/`weekly`/`monthly`/`null`, `task.status` to one of `todo`/`in_progress`/`waiting_review`/`done` (falling back from the legacy `task.done` boolean), `task.estimateMinutes` to a positive integer or `null`, and `task.kanbanOrder` to a non-negative integer or `null` (`task.note` is coerced to string/`null` but otherwise passed through — it's always rendered via `esc()`). Fields like `color`/`estimateMinutes` are rendered unescaped into `style="background:..."` / `value="..."` attributes client-side, so a crafted API payload or hand-edited `data/enchanter-data.json` could otherwise break out of the attribute. Any new enum-like field rendered into an HTML attribute needs the same treatment (either server-side validation or `esc()` on the client).
 
 ### Client state shape
 
 Two module-level globals in `app.js` hold everything:
-- `data` — the persisted domain model: `{ clients[], projects[], tasks[], entries[] }`. Mirrors `data/enchanter-data.json` exactly (see `README.md` for the schema). `entries` with `end: null` represent an in-progress timer; multiple tasks can be timed concurrently.
+- `data` — the persisted domain model: `{ clients[], projects[], tasks[], entries[] }`. Mirrors `data/enchanter-data.json` exactly (see `README.md` for the schema). `entries` with `end: null` represent an in-progress timer; multiple tasks can be timed concurrently. `task.status` is `'todo' | 'in_progress' | 'waiting_review' | 'done'` (未着手/作業中/作業済み(確認待ち)/完了), ordered by `TASK_STATUS_ORDER`: the status button cycles through it on each click (`nextTaskStatus()`), and kanban cards move along it with the arrow keys. All status changes go through `setTaskStatus()`: entering `done` from any state records `completedAt`, stops the task's running timer and spawns the next occurrence of a repeating task; leaving `done` resets `completedAt` to `null`. Starting a timer on a `todo` task moves it to `in_progress` (`startTimer()`), and `init()` promotes any `todo` task that already has entries to `in_progress` (`promoteStartedTasks()`). Manual ordering within a kanban column is persisted as `task.kanbanOrder`, reset to `null` whenever the status changes.
 - `ui` — transient view state (active tab, date ranges for timeline/gantt/report, which item is currently being edited, etc.). Never persisted.
 
 ### Render/mutate/save cycle
@@ -44,19 +45,20 @@ Two module-level globals in `app.js` hold everything:
 There is no diffing or virtual DOM. The pattern used throughout is:
 1. A mutation function changes `data` or `ui` directly (e.g. `startTimer`, `deleteTask`).
 2. It calls `save()`, which serializes all of `data` and `PUT`s it to `/api/data`. Saves are chained through a single promise (`saveChain`) so rapid-fire edits can't race and reorder on the server.
-3. It calls `renderAll()`, which re-renders the active tab's markup wholesale into `#view` via template-literal HTML strings (see `render*` functions, one per tab: `renderTodo`, `renderTimeline`, `renderGantt`, `renderReport`, `renderManage`).
+3. It calls `renderAll()`, which re-renders the active tab's markup wholesale into `#view` via template-literal HTML strings (see `render*` functions, one per tab: `renderTodo`, `renderKanban`, `renderTimeline`, `renderGantt`, `renderReport`, `renderManage`).
 
 ### Event handling
 
 All interactive elements are wired through **one delegated listener per DOM event type** at the bottom of `app.js` (`/* ---------- events ---------- */`), not per-element handlers:
 - `click` → dispatches on `[data-action]` / `el.dataset.action` via a big `switch`.
 - `change` and `submit` → separate delegated listeners, same `data-action`/`data-*` attribute convention.
+- Kanban and gantt drag operations are handled by delegated `pointerdown`/`pointermove`/`pointerup` listeners keyed on a `data-action-pointer` attribute; arrow-key moves on cards go through the delegated `keydown` listener.
 
 When adding a new interactive control, follow this convention: add a `data-action="..."` (and `data-id`/other `data-*` as needed) attribute in the template string, then add a `case` to the matching delegated listener rather than attaching a new listener.
 
 ### Tabs
 
-Each tab (`todo`, `timeline`, `gantt`, `report`, `manage`) is an independent `render*` function producing a full HTML string for `#view`; switching tabs just changes `ui.tab` and calls `renderAll()`. Tab state (plus the active tab's dates/ranges) is mirrored into the URL hash (`#timeline?date=...`) by `buildHash()`, applied once at the end of `renderAll()` via `history.replaceState` — since every state change goes through `renderAll()`, no per-mutation hash updates are needed. `applyHash()` (called at `init()` and on `hashchange`) parses and validates the hash back into `ui`, so reload/bookmarks/back-forward restore the view.
+Each tab (`todo`, `kanban`, `timeline`, `gantt`, `report`, `manage`) is an independent `render*` function producing a full HTML string for `#view`; switching tabs just changes `ui.tab` and calls `renderAll()`. Tab state (plus the active tab's dates/ranges) is mirrored into the URL hash (`#timeline?date=...`) by `buildHash()`, applied once at the end of `renderAll()` via `history.replaceState` — since every state change goes through `renderAll()`, no per-mutation hash updates are needed. `applyHash()` (called at `init()` and on `hashchange`) parses and validates the hash back into `ui`, so reload/bookmarks/back-forward restore the view.
 
 ### Editing pattern
 

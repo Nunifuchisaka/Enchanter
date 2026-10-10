@@ -12,7 +12,8 @@ Enchanterは、セルフホスト・単一ユーザー向けのタスク/時間�
 
 - サーバー起動: `node server.js`(Windowsは`start.cmd`をダブルクリックでも可。ブラウザも自動で開く)
 - Dockerで起動: `docker compose up -d`
-- ビルドステップ・バンドラー・テストスイート・リンターなし — `app.js`/`style.css`/`index.html`はそのまま配信される
+- ビルドステップ・バンドラー・リンターなし — `app.js`/`style.css`/`index.html`はそのまま配信される
+- テスト: `node --test tests/task-improvements.test.js`(Node標準の`node:test`を使用。依存パッケージなし)
 - 既定ポートは`8787`(`PORT`環境変数で上書き可)。データディレクトリは既定`./data`(`DATA_DIR`で上書き可)。待受アドレスは既定`127.0.0.1`(認証機能がないためループバックのみ。LANに公開する場合は`HOST`環境変数で上書き)
 - アプリは必ずサーバー経由(`http://localhost:8787`)でアクセスする必要がある。`index.html`を直接開く(`file://`)と保存にHTTP APIが必要なため動作せず、`app.js`側でもこのケースを検知してブロックしている
 
@@ -29,12 +30,12 @@ Enchanterは、セルフホスト・単一ユーザー向けのタスク/時間�
 
 ログイン/セッション機構は存在せず、信頼境界は「ポートに到達できる者すべて」となっている。この境界を保つために2つの仕組みがあり、`server.js`/`app.js`を触る際は必ず維持すること:
 - 状態変更系エンドポイント(`PUT /api/data`, `POST /api/google/disconnect`, `POST /api/calendar/sync-entry`)はすべて`X-Requested-With: enchanter`ヘッダーを要求する(`requireCsrfHeader()`でチェック)。これによりメソッドを問わずすべてのリクエストでCORSプリフライトが発生する。サーバーは`OPTIONS`に応答せず`Access-Control-Allow-Origin`も送らないため、悪意あるページからブラウザ経由でこれらのエンドポイントを叩く(drive-by CSRF)ことができない。新しく状態変更系エンドポイントを追加する場合は必ず`requireCsrfHeader()`を呼び、`app.js`側の対応する`fetch()`呼び出しにも同ヘッダーを付けること
-- `PUT /api/data`(および読み込み時の`readData()`)はペイロードを`sanitizeData()`に通し、`project.color`を`/^#[0-9a-fA-F]{6}$/`に、`task.repeat`を`daily`/`weekly`/`monthly`/`null`のいずれかに、`task.status`を`todo`/`waiting_review`/`done`のいずれかに(旧`task.done`真偽値からのフォールバックあり。後述)、`task.estimateMinutes`を正の整数または`null`に強制する(`task.note`は文字列/`null`に補正されるがそれ以外はそのまま通す — 常に`esc()`経由で描画される)。`task.subtasks`は`{ id, title, done }`の形に整った要素だけにフィルタされる(タイトルが欠落/非文字列の要素は除外、idが無ければ`crypto.randomUUID()`で補完)。`task.tags`はトリム済み・空要素なし・重複なしの文字列配列に強制される(`sanitizeTags()`。描画は常に`esc()`経由)。`data.categories`(カテゴリマスタ)は`name`が欠落/空文字の要素を除外し(idが無ければ`crypto.randomUUID()`で補完)、`task.categoryId`は非空文字列または`null`に強制される(名前の描画は常に`esc()`経由)。`data.filters`(保存済みフィルター)も同様に、`name`が欠落/空文字の要素は除外し、`importance`/`month`を許可された値の集合に強制する。`color`/`estimateMinutes`のようなフィールドはクライアント側で`style="background:..."` / `value="..."`属性に無エスケープで埋め込まれるため、不正なAPIペイロードや手編集された`data/enchanter-data.json`が属性からの脱出を許してしまう可能性がある。HTML属性に描画される新しい列挙型フィールドを追加する場合は、同様の対処(サーバー側バリデーションまたはクライアント側`esc()`)が必要
+- `PUT /api/data`(および読み込み時の`readData()`)はペイロードを`sanitizeData()`に通し、`project.color`を`/^#[0-9a-fA-F]{6}$/`に、`task.repeat`を`daily`/`weekly`/`monthly`/`null`のいずれかに、`task.status`を`todo`/`in_progress`/`waiting_review`/`done`のいずれかに(旧`task.done`真偽値からのフォールバックあり。後述)、`task.estimateMinutes`を正の整数または`null`に、`task.kanbanOrder`を0以上の整数または`null`に強制する(`task.note`は文字列/`null`に補正されるがそれ以外はそのまま通す — 常に`esc()`経由で描画される)。`task.subtasks`は`{ id, title, done }`の形に整った要素だけにフィルタされる(タイトルが欠落/非文字列の要素は除外、idが無ければ`crypto.randomUUID()`で補完)。`task.tags`はトリム済み・空要素なし・重複なしの文字列配列に強制される(`sanitizeTags()`。描画は常に`esc()`経由)。`data.categories`(カテゴリマスタ)は`name`が欠落/空文字の要素を除外し(idが無ければ`crypto.randomUUID()`で補完)、`task.categoryId`は非空文字列または`null`に強制される(名前の描画は常に`esc()`経由)。`data.filters`(保存済みフィルター)も同様に、`name`が欠落/空文字の要素は除外し、`importance`/`month`を許可された値の集合に強制する。`color`/`estimateMinutes`のようなフィールドはクライアント側で`style="background:..."` / `value="..."`属性に無エスケープで埋め込まれるため、不正なAPIペイロードや手編集された`data/enchanter-data.json`が属性からの脱出を許してしまう可能性がある。HTML属性に描画される新しい列挙型フィールドを追加する場合は、同様の対処(サーバー側バリデーションまたはクライアント側`esc()`)が必要
 
 ### クライアントの状態構造
 
 `app.js`内のモジュールレベルのグローバル変数2つがすべてを保持する:
-- `data` — 永続化されるドメインモデル: `{ clients[], projects[], tasks[], entries[] }`。`data/enchanter-data.json`と完全に一致する(スキーマは`README.md`参照)。`end: null`の`entries`は計測中のタイマーを表し、複数タスクを同時に計測できる。`task.status`は`'todo' | 'waiting_review' | 'done'`(ステータス切替ボタンをクリックするたびにこの順で巡回する。実装は`nextTaskStatus()`。ネイティブのcheckboxでは3状態を表現できないため)。`todo → done`への遷移時のみ、計測中タイマーの自動停止と繰り返しタスクの次回分生成が発火する — `waiting_review`を経由してもどちらも発火しない。各タスクは`subtasks[]`チェックリスト(`{ id, title, done }`)と、自由入力の`tags[]`(文字列配列。マスタは持たず、使用中タグの一覧は`allTags()`で全タスクから導出する)も持つ。カテゴリはタグと異なりマスタ(`data.categories`、管理タブで作成)を持ち、各タスクは`categoryId`でひとつだけ参照する
+- `data` — 永続化されるドメインモデル: `{ clients[], projects[], tasks[], entries[] }`。`data/enchanter-data.json`と完全に一致する(スキーマは`README.md`参照)。`end: null`の`entries`は計測中のタイマーを表し、複数タスクを同時に計測できる。`task.status`は`'todo' | 'in_progress' | 'waiting_review' | 'done'`(未着手/作業中/作業済み(確認待ち)/完了。順序は`TASK_STATUS_ORDER`で、ステータス切替ボタンはクリックするたびにこの順で巡回し(`nextTaskStatus()`)、カンバンのカードは矢印キーでこの順に前後へ移動する。ネイティブのcheckboxでは複数状態を表現できないためボタンにしている)。状態の変更は`setTaskStatus()`に集約されており、`done`に入る遷移ではどの状態からでも完了時刻の記録・計測中タイマーの自動停止・繰り返しタスクの次回分生成が発火し、`done`以外への遷移では`completedAt`が`null`に戻る。未着手タスクのタイマーを開始すると自動で`in_progress`になり(`startTimer()`)、`init()`時にも作業記録を持つ未着手タスクは`in_progress`へ昇格する(`promoteStartedTasks()`)。カンバン内の手動の並び順は`task.kanbanOrder`に保存され、状態が変わると`null`に戻る。各タスクは`subtasks[]`チェックリスト(`{ id, title, done }`)と、自由入力の`tags[]`(文字列配列。マスタは持たず、使用中タグの一覧は`allTags()`で全タスクから導出する)も持つ。カテゴリはタグと異なりマスタ(`data.categories`、管理タブで作成)を持ち、各タスクは`categoryId`でひとつだけ参照する
 - `ui` — 一時的な表示状態(アクティブなタブ、timeline/gantt/reportの日付範囲、現在編集中の項目など)。永続化されない
 
 ### レンダー/更新/保存サイクル
@@ -42,19 +43,20 @@ Enchanterは、セルフホスト・単一ユーザー向けのタスク/時間�
 差分検出や仮想DOMは存在しない。全体を通して使われるパターンは:
 1. mutation関数が`data`または`ui`を直接変更する(例: `startTimer`, `deleteTask`)
 2. `save()`を呼ぶ。`data`全体をシリアライズして`/api/data`に`PUT`する。保存は単一のPromiseチェーン(`saveChain`)を通るため、連続した編集がサーバー側で競合・順序逆転することがない
-3. `renderAll()`を呼ぶ。アクティブなタブのマークアップをテンプレートリテラルのHTML文字列として`#view`にまるごと再描画する(タブごとに1つの`render*`関数: `renderTodo`, `renderTimeline`, `renderGantt`, `renderReport`, `renderManage`)
+3. `renderAll()`を呼ぶ。アクティブなタブのマークアップをテンプレートリテラルのHTML文字列として`#view`にまるごと再描画する(タブごとに1つの`render*`関数: `renderTodo`, `renderKanban`, `renderTimeline`, `renderGantt`, `renderReport`, `renderManage`)
 
 ### イベントハンドリング
 
 インタラクティブな要素はすべて、`app.js`末尾(`/* ---------- events ---------- */`)にある**DOMイベント種別ごとに1つの委譲リスナー**で処理される。要素ごとの個別ハンドラは使わない:
 - `click` → `[data-action]` / `el.dataset.action`に基づき大きな`switch`で分岐
 - `change`と`submit` → 別々の委譲リスナーで、同じく`data-action`/`data-*`属性の規約に従う
+- カンバン・ガントのドラッグ操作は`pointerdown`/`pointermove`/`pointerup`の委譲リスナーで処理し、対象要素は`data-action-pointer`属性で示す。カードの矢印キー操作は`keydown`の委譲リスナーで処理する
 
 新しいインタラクティブなコントロールを追加する場合は、この規約に従うこと: テンプレート文字列に`data-action="..."`(および必要に応じて`data-id`などの`data-*`)属性を追加し、新しいリスナーをアタッチするのではなく、該当する委譲リスナーに`case`を追加する
 
 ### タブ
 
-各タブ(`todo`, `timeline`, `gantt`, `report`, `manage`)は独立した`render*`関数で、`#view`向けの完全なHTML文字列を生成する。タブ切替は`ui.tab`を変更して`renderAll()`を呼ぶだけ。タブの状態(および現在のタブの日付・期間)は`buildHash()`によってURLハッシュ(`#timeline?date=...`)に反映され、`renderAll()`の最後で`history.replaceState`により一度だけ適用される — すべての状態変更が`renderAll()`を経由するため、mutationごとにハッシュを更新する必要はない。`applyHash()`(`init()`時と`hashchange`時に呼ばれる)がハッシュをパース・検証して`ui`に反映するため、リロード/ブックマーク/戻る・進むでも表示状態が復元される
+各タブ(`todo`, `kanban`, `timeline`, `gantt`, `report`, `manage`)は独立した`render*`関数で、`#view`向けの完全なHTML文字列を生成する。タブ切替は`ui.tab`を変更して`renderAll()`を呼ぶだけ。タブの状態(および現在のタブの日付・期間)は`buildHash()`によってURLハッシュ(`#timeline?date=...`)に反映され、`renderAll()`の最後で`history.replaceState`により一度だけ適用される — すべての状態変更が`renderAll()`を経由するため、mutationごとにハッシュを更新する必要はない。`applyHash()`(`init()`時と`hashchange`時に呼ばれる)がハッシュをパース・検証して`ui`に反映するため、リロード/ブックマーク/戻る・進むでも表示状態が復元される
 
 ### 編集パターン
 
