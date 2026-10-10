@@ -11,17 +11,21 @@ function rememberDeletion(tasks, entries) {
 }
 
 // 既に存在する項目は重複させない。作業記録のタスクが無ければ戻さない。
-// 同じタスクが今も計測中なら、戻す計測中の記録は現在時刻で止める
+// 同じタスクが今も計測中なら、戻す計測中の記録は現在時刻で止める。
+// 削除時にGoogleカレンダーの予定も消しているので、戻した記録は再同期する
 function undoDeletion() {
   const removed = deletionHistory.pop();
   if (!removed) return;
   data.tasks.push(...removed.tasks.filter((task) => !taskById(task.id)));
+  const restored = [];
   for (const entry of removed.entries) {
     if (entryById(entry.id) || !taskById(entry.taskId)) continue;
     if (entry.end === null && runningEntryForTask(entry.taskId)) entry.end = Date.now();
     data.entries.push(entry);
+    restored.push(entry);
   }
   save();
+  restored.forEach(syncEntryToGoogle);
 }
 
 // 複数タスクの並行計測に対応(同じタスクの二重計測のみ防ぐ)
@@ -82,10 +86,12 @@ function reorderKanbanTask(task, status, beforeId, afterId) {
 
 // 確認ダイアログは出さない。ゴミ箱の2回クリック(armTaskDelete)で確認し、取り消しバナーで戻せる
 function deleteTask(id) {
-  rememberDeletion(data.tasks.filter((task) => task.id === id), data.entries.filter((entry) => entry.taskId === id));
+  const entries = data.entries.filter((entry) => entry.taskId === id);
+  rememberDeletion(data.tasks.filter((task) => task.id === id), entries);
   data.tasks = data.tasks.filter((task) => task.id !== id);
   data.entries = data.entries.filter((entry) => entry.taskId !== id);
   save();
+  removeEntriesFromGoogle(entries);
   renderAll();
 }
 

@@ -234,6 +234,16 @@ function syncEntryToGoogle(entry) {
   }).catch((error) => console.warn('Googleカレンダーへの同期に失敗しました', error));
 }
 
+// 削除した作業記録のGoogleカレンダー予定を削除する(未連携なら何もしない、失敗しても削除操作はブロックしない)
+function removeEntriesFromGoogle(entries) {
+  if (entries.length === 0 || !ui.googleStatus.connected) return;
+  fetch('/api/calendar/delete-entries', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
+    body: JSON.stringify({ entryIds: entries.map((entry) => entry.id) }),
+  }).catch((error) => console.warn('Googleカレンダーの予定削除に失敗しました', error));
+}
+
 async function connectGoogle() {
   try {
     const response = await fetch('/api/google/auth-url');

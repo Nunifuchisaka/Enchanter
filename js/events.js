@@ -88,12 +88,15 @@ document.addEventListener('click', (event) => {
       clearEditing();
       ui.editingEntry = id;
       break;
-    case 'del-entry':
+    case 'del-entry': {
       if (!confirm('この作業記録を削除します。よろしいですか?')) return;
-      rememberDeletion([], data.entries.filter((entry) => entry.id === id));
+      const entries = data.entries.filter((entry) => entry.id === id);
+      rememberDeletion([], entries);
       data.entries = data.entries.filter((entry) => entry.id !== id);
       save();
+      removeEntriesFromGoogle(entries);
       break;
+    }
     case 'edit-client':
       clearEditing();
       ui.editingClient = id;

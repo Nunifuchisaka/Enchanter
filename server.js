@@ -268,6 +268,32 @@ async function upsertCalendarEvent(accessToken, { entryId, title, project, start
   return createdEvent.id;
 }
 
+// 削除された作業記録に対応するGoogleカレンダーの予定を削除し、対応表からも外す。
+// 対応表に無いエントリ(未同期・計測中)は無視する。カレンダー側で削除済み(404/410)なら成功扱い。
+// 対応表から外しておくことで、取り消し(undo)で戻した記録の再同期は新規作成になる
+async function deleteCalendarEvents(accessToken, entryIds) {
+  const syncMap = readJsonSafe(GOOGLE_SYNC_MAP_FILE, {});
+  let deleted = 0;
+  let failed = 0;
+  for (const entryId of entryIds) {
+    const eventId = syncMap[entryId];
+    if (!eventId) continue;
+    const response = await fetch(`${GOOGLE_EVENTS_URL}/${eventId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (response.ok || response.status === 404 || response.status === 410) {
+      delete syncMap[entryId];
+      deleted++;
+    } else {
+      console.error(`Googleカレンダーの予定削除に失敗しました: ${response.status}`);
+      failed++;
+    }
+  }
+  if (deleted > 0) writeJsonAtomic(GOOGLE_SYNC_MAP_FILE, syncMap);
+  return { deleted, failed };
+}
+
 async function handleOAuthCallback(url, res) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
@@ -318,6 +344,26 @@ async function handleSyncEntry(payload, res) {
   }
 }
 
+async function handleDeleteEntries(payload, res) {
+  const { entryIds } = payload;
+  if (!Array.isArray(entryIds) || !entryIds.every((id) => typeof id === 'string' && id !== '')) {
+    sendJson(res, 400, { error: '不正なリクエストです' });
+    return;
+  }
+  try {
+    const accessToken = await getValidAccessToken();
+    if (!accessToken) {
+      sendJson(res, 409, { error: 'Google未連携です' });
+      return;
+    }
+    const result = await deleteCalendarEvents(accessToken, entryIds);
+    sendJson(res, result.failed > 0 ? 502 : 200, { ok: result.failed === 0, ...result });
+  } catch (error) {
+    console.error('Googleカレンダーの予定削除に失敗しました', error);
+    sendJson(res, 502, { error: '予定の削除に失敗しました' });
+  }
+}
+
 function handleGoogleStatus(res) {
   sendJson(res, 200, { configured: !!getGoogleCredentials(), connected: !!getGoogleToken() });
 }
@@ -346,7 +392,8 @@ function handleGoogleDisconnect(res) {
   sendNoContent(res);
 }
 
-function handleSyncEntryRequest(req, res) {
+// JSONオブジェクトの本文を読み、handler(payload, res) に渡す(不正なJSONなら400)
+function handleJsonRequest(req, res, handler) {
   readBody(req, res, (body) => {
     let payload;
     try {
@@ -355,7 +402,7 @@ function handleSyncEntryRequest(req, res) {
       sendJson(res, 400, { error: '不正なJSONです' });
       return;
     }
-    handleSyncEntry(payload, res).catch((error) => sendInternalError(res, error));
+    handler(payload, res).catch((error) => sendInternalError(res, error));
   });
 }
 
@@ -419,7 +466,12 @@ function routeRequest(req, res) {
   }
 
   if (url.pathname === '/api/calendar/sync-entry') {
-    if (allowMethod(req, res, 'POST') && requireCsrfHeader(req, res)) handleSyncEntryRequest(req, res);
+    if (allowMethod(req, res, 'POST') && requireCsrfHeader(req, res)) handleJsonRequest(req, res, handleSyncEntry);
+    return;
+  }
+
+  if (url.pathname === '/api/calendar/delete-entries') {
+    if (allowMethod(req, res, 'POST') && requireCsrfHeader(req, res)) handleJsonRequest(req, res, handleDeleteEntries);
     return;
   }
 

@@ -112,8 +112,8 @@ test('daily backups retain original data and sanitize today/search fields', () =
   }
 });
 
-function loadServerModule(dir) {
-  const context = vm.createContext({ require, console, Buffer, __dirname:root, process:{env:{DATA_DIR:dir}} });
+function loadServerModule(dir, globals = {}) {
+  const context = vm.createContext({ require, console, Buffer, __dirname:root, process:{env:{DATA_DIR:dir}}, ...globals });
   const source = fs.readFileSync(path.join(root, 'server.js'), 'utf8').replace(/server\.listen\(PORT, HOST,[\s\S]*$/, '');
   vm.runInContext(source, context);
   return { context, run: (code) => vm.runInContext(code, context) };
@@ -284,4 +284,74 @@ test('an edit made while an external-change check is running is not dropped sile
   await vm.runInContext('saveChain', context);
   assert.equal(alerts.length, 1);
   assert.equal(vm.runInContext("data.tasks.map((task) => task.id).join()", context), 'cli-task');
+});
+
+test('deleting synced entries deletes their calendar events and forgets the mapping', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-test-'));
+  try {
+    const mapFile = path.join(dir, 'google-sync-map.json');
+    fs.writeFileSync(mapFile, JSON.stringify({ gone: 'ev-gone', kept: 'ev-kept', other: 'ev-other', failing: 'ev-fail' }));
+    const calls = [];
+    const fetch = async (url, options) => {
+      calls.push(`${options.method} ${url.split('/').pop()}`);
+      const status = { 'ev-gone': 410, 'ev-fail': 500 }[url.split('/').pop()] || 204;
+      return { ok: status < 300, status };
+    };
+    const { run } = loadServerModule(dir, { fetch, console: { error() {} } });
+    const result = await run("deleteCalendarEvents('token', ['kept', 'gone', 'failing', 'never-synced'])");
+    assert.deepEqual(calls, ['DELETE ev-kept', 'DELETE ev-gone', 'DELETE ev-fail']);
+    assert.equal(result.deleted, 2);
+    assert.equal(result.failed, 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(mapFile, 'utf8')), { other: 'ev-other', failing: 'ev-fail' });
+  } finally {
+    fs.rmSync(dir, {recursive:true, force:true});
+  }
+});
+
+test('delete-entries rejects malformed bodies and requires a Google connection', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-test-'));
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(root, 'server.js')], {
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir },
+    stdio: 'ignore',
+  });
+  try {
+    await waitForServer(port);
+    const request = (body, headers = { 'X-Requested-With': 'enchanter' }) =>
+      httpRequest(port, { method: 'POST', path: '/api/calendar/delete-entries', headers, body });
+    assert.equal((await request(JSON.stringify({ entryIds: ['a'] }), {})).status, 400);
+    for (const body of ['null', '{}', '{"entryIds":"a"}', '{"entryIds":[1]}']) {
+      assert.equal((await request(body)).status, 400);
+    }
+    assert.equal((await request(JSON.stringify({ entryIds: ['a'] }))).status, 409);
+  } finally {
+    child.kill();
+    fs.rmSync(dir, {recursive:true, force:true});
+  }
+});
+
+test('deleting entries or tasks asks the server to delete calendar events; undo re-syncs them', () => {
+  const { run, listeners } = client();
+  run(`var requests = []; var synced = [];
+    fetch = (url, options) => { requests.push({ url, body: JSON.parse(options.body) }); return Promise.resolve(); };
+    syncEntryToGoogle = (entry) => synced.push(entry.id);
+    ui.googleStatus.connected = true;
+    data.tasks = [{id:'a', title:'A'}, {id:'b', title:'B'}];
+    data.entries = [
+      {id:'a1', taskId:'a', start:100, end:200},
+      {id:'b1', taskId:'b', start:100, end:200},
+      {id:'b2', taskId:'b', start:300, end:400}
+    ];`);
+  const button = { dataset: { action: 'del-entry', id: 'a1' } };
+  listeners.click({ target: { closest: () => button } });
+  run("deleteTask('b');");
+  assert.deepEqual(JSON.parse(run('JSON.stringify(requests)')), [
+    { url: '/api/calendar/delete-entries', body: { entryIds: ['a1'] } },
+    { url: '/api/calendar/delete-entries', body: { entryIds: ['b1', 'b2'] } },
+  ]);
+  run('undoDeletion();');
+  assert.equal(run("synced.join(',')"), 'b1,b2');
+
+  run("requests = []; ui.googleStatus.connected = false; deleteTask('b');");
+  assert.equal(run('requests.length'), 0);
 });

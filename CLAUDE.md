@@ -64,14 +64,14 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 
 信頼境界は「ポートに到達できる者すべて」。
 
-- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
+- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`、`POST /api/calendar/delete-entries`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
 - データファイルへの書き込みは必ず`store.js`の`writeData()`(内部で`sanitizeData()`を通す)を使う。`color`・`estimateMinutes`などクライアントが`esc()`なしでHTML属性に埋め込む値はここで形式を強制している。HTML属性に描画する列挙型の項目を追加するときは、サーバー側で検証するか描画時に`esc()`する
 - 静的ファイルは`/`・`/index.html`と、`/js/`・`/css/`直下の英小文字・数字・ハイフン名のファイルだけを配信する(`staticRouteFor()`)
 
 ### その他
 
 - `js/state.js`の`migrateFromLocalStorage`は旧localStorage版からの一回限りの移行。サーバー側が空のときだけ動く。利用者がいないか確認せずに削除しない
-- Googleカレンダー連携は任意機能で、Googleとの通信はすべて`server.js`(`fetch`でREST APIを直接呼ぶ)。認証情報は`data/google-credentials.json`/`google-token.json`、作業記録とイベントの対応は`google-sync-map.json`。クライアントは作業記録の`end`が確定するたびに`syncEntryToGoogle()`でfire-and-forget同期する。認証情報が無ければ`ui.googleStatus.configured`が`false`になり、どこでも不活性
+- Googleカレンダー連携は任意機能で、Googleとの通信はすべて`server.js`(`fetch`でREST APIを直接呼ぶ)。認証情報は`data/google-credentials.json`/`google-token.json`、作業記録とイベントの対応は`google-sync-map.json`。クライアントは作業記録の`end`が確定するたびに`syncEntryToGoogle()`でfire-and-forget同期する。作業記録の削除(単体・タスク削除に伴う一括)時は`removeEntriesFromGoogle()`が`POST /api/calendar/delete-entries`で予定を消し、サーバーは`google-sync-map.json`から対応を外す。`undoDeletion()`で戻した記録は再同期され、新しい予定として作り直される。認証情報が無ければ`ui.googleStatus.configured`が`false`になり、どこでも不活性
 
 ## Claude Codeの運用指示
 
