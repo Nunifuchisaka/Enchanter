@@ -54,6 +54,8 @@ let saveChain = Promise.resolve();
 let dataRevision = null;
 // 外部の変更を読み直すたびに増やす。読み直す前に積まれた保存は古いデータなので送らない
 let dataGeneration = 0;
+// 送信待ちの保存の数。残っている間は外部変更の取り込みを見送り、保存側の409(通知あり)に任せる
+let pendingSaves = 0;
 // 画面を開いたまま他の場所(CLI)で変更されていないかを確かめる間隔
 const EXTERNAL_CHANGE_CHECK_MS = 5000;
 // 変更操作で再描画された後に、同じ入力欄へフォーカスを戻すための情報
@@ -120,20 +122,25 @@ async function fetchGoogleStatus() {
 function save() {
   const body = JSON.stringify(data);
   const generation = dataGeneration;
+  pendingSaves += 1;
   saveChain = saveChain
     .then(async () => {
-      if (generation !== dataGeneration) return;
-      const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' };
-      if (dataRevision) headers['If-Match'] = dataRevision;
-      const response = await fetch('/api/data', { method: 'PUT', headers, body });
-      if (response.status === 409) {
-        await reloadAfterExternalChange();
-        alert('別の場所(CLIなど)でデータが更新されていたため、最新の内容を読み込みました。直前の操作は保存されていないので、もう一度行ってください。');
-        return;
+      try {
+        if (generation !== dataGeneration) return;
+        const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' };
+        if (dataRevision) headers['If-Match'] = dataRevision;
+        const response = await fetch('/api/data', { method: 'PUT', headers, body });
+        if (response.status === 409) {
+          await reloadAfterExternalChange();
+          alert('別の場所(CLIなど)でデータが更新されていたため、最新の内容を読み込みました。直前の操作は保存されていないので、もう一度行ってください。');
+          return;
+        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        dataRevision = response.headers.get('X-Data-Revision') || dataRevision;
+        saveWarned = false;
+      } finally {
+        pendingSaves -= 1;
       }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      dataRevision = response.headers.get('X-Data-Revision') || dataRevision;
-      saveWarned = false;
     })
     .catch((error) => {
       if (!saveWarned) {
@@ -174,7 +181,8 @@ function checkExternalChange() {
       const response = await fetch('/api/data/revision');
       if (!response.ok) return;
       const { revision } = await response.json();
-      if (revision !== dataRevision) await reloadAfterExternalChange();
+      // 確認中に操作されて保存が積まれていたら、黙って読み直すとその操作が消えるので見送る
+      if (revision !== dataRevision && pendingSaves === 0) await reloadAfterExternalChange();
     })
     .catch((error) => console.warn('データの更新確認に失敗しました', error));
 }
