@@ -4,6 +4,7 @@
   "private": true,
   "description": "タスク管理・時間計測ツール",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   }
 }
