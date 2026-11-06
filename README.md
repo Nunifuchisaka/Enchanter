@@ -172,7 +172,7 @@ bash mac/uninstall-launchagent.sh
 
 ## PRの自動レビュー・自動マージ
 
-`.github/workflows/auto-review-merge.yml`(呼び出し側)から、共通の本体 `.github/workflows/claude-review-reusable.yml` を呼び出して、PRごとに次を自動で行います。本体はEnchanterにだけ置かれており、他のリポジトリにも同じ呼び出しファイルを置けば同じ仕組みで動きます(本体を直すと全リポジトリに反映されます)。
+`.github/workflows/auto-review-merge.yml`(呼び出し側)から、共通の本体 `.github/workflows/claude-review-reusable.yml` を呼び出して、PRごとに次を自動で行います。本体はEnchanterにだけ置かれており、他のリポジトリにも同じ呼び出しファイルを置けば同じ仕組みで動きます(本体を直すと全リポジトリに反映されます。他のリポジトリから呼び出せるのは、Enchanterがpublicリポジトリだからです)。
 
 1. テスト(`package.json` に `test` スクリプトがあれば `npm test`、なければなし)と、Claudeによるコードレビューを並行実行
 2. レビュー結果をPRにコメント

@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   auto-review:
-    uses: Nunifuchisaka/Enchanter/.github/workflows/claude-review-reusable.yml@claude/project-thread-jg8qm5
+    uses: Nunifuchisaka/Enchanter/.github/workflows/claude-review-reusable.yml@main
     with:
       pr_number: ${{ format('{0}', github.event.pull_request.number || inputs.pr_number) }}
     secrets: inherit

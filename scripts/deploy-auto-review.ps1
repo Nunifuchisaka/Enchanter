@@ -11,7 +11,8 @@
 
 param(
   [string]$Owner = 'Nunifuchisaka',
-  [string[]]$Repos
+  [string[]]$Repos,
+  [switch]$Force   # 同名の別内容ファイルがあっても上書きする
 )
 
 $path = '.github/workflows/auto-review-merge.yml'
@@ -42,6 +43,11 @@ foreach ($r in $targets) {
 
   $sha = gh api "repos/$r/contents/$path" -q .sha 2>$null
   $hasFile = ($LASTEXITCODE -eq 0 -and $sha)
+  if ($hasFile) {
+    $current = (gh api "repos/$r/contents/$path" -q .content) -join '' -replace '\s', ''
+    if ($current -eq $content) { Write-Host '  ワークフローは最新'; $ok += $r; continue }
+    if (-not $Force) { $ng += "$r (別内容の $path があるためスキップ。上書きするなら -Force)"; continue }
+  }
   $ghArgs = @('api', '-X', 'PUT', "repos/$r/contents/$path",
             '-f', 'message=PRの自動レビュー(Claude)と自動マージのワークフローを追加',
             '-f', "content=$content", '--silent')

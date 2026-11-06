@@ -190,5 +190,6 @@ jobs:
             if gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" "$method" --match-head-commit "$SHA"; then
               exit 0
             fi
+            echo "::warning::$method でのマージに失敗(上のエラーを参照)。次の方式を試します"
           done
           exit 1
