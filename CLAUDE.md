@@ -10,9 +10,13 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 - 起動: `node server.js` → `http://localhost:8787`(`PORT`/`DATA_DIR`(既定`./data`)/`HOST`(既定`127.0.0.1`。認証がないためループバックのみ)で上書き)
 - ビルド・バンドラー・リンターはない。`file://`で直接開くと動かない(`js/main.js`の`init()`が検知してブロック)
 
+## タスクの操作(登録・一覧・計測など)
+
+ユーザーに頼まれたタスク操作は`node cli.js <コマンド>`で行う。サーバーの起動は不要で、画面を開いていれば数秒で反映される。コマンド一覧と出力形式は`node cli.js help`(短い)。例: `node cli.js add 請求書を送る -p Webサイト --start tomorrow -i 2`、`node cli.js ls --today`、`node cli.js done <id>`。出力は1件1行で、先頭がid(前方一致で指定可)。
+
 ## トークンを節約するための作業ルール
 
-- `data/`配下は読まない(`enchanter-data.json`は`.claude/settings.json`でdeny済み。`backups/`やGoogle認証情報も同様に読まない)。ユーザーの個人データが入っている。動作確認には一時ディレクトリを`DATA_DIR`に指定してサンプルデータを使う
+- `data/`配下のファイルは直接読まない(`enchanter-data.json`は`.claude/settings.json`でdeny済み。`backups/`やGoogle認証情報も同様)。データの確認・変更は`cli.js`を使う。コードの動作確認には一時ディレクトリを`DATA_DIR`に指定してサンプルデータを使う
 - 変更したい画面・機能から下の「ファイルマップ」で対象ファイルを決め、そのファイルだけを読む。関数を探すときは`Grep`で定義行(`^function 名前`)を見つけてから`Read`の`offset`/`limit`で必要な範囲だけ読む
 - `README.md`はエンドユーザー向け。データ構造(スキーマ)を確認するとき以外は読まなくてよい
 
@@ -34,8 +38,10 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 | クリック・入力・送信・ドラッグ・キーボードの処理 | `js/events.js` |
 | 経過時間の毎秒更新・`init()` | `js/main.js`(最後に読み込む) |
 | スタイル | `css/base.css`(トークン・共通部品) / `css/<タブ名>.css` / `css/responsive.css`(最後。全タブを上書き) |
-| API・保存・バリデーション・Googleカレンダー連携 | `server.js` |
-| テスト | `tests/task-improvements.test.js`(画面・ロジック) / `tests/static-assets.test.js`(配信) |
+| データの検証(`sanitizeData`)・ファイルの読み書き・バックアップ・リビジョン | `store.js`(server.jsとcli.jsが共用) |
+| API・静的配信・Googleカレンダー連携 | `server.js` |
+| タスク操作CLI | `cli.js`(`js/`のconstants〜mutationsをvmで読み込んで画面と同じ副作用を再利用する) |
+| テスト | `tests/task-improvements.test.js`(画面・ロジック) / `tests/static-assets.test.js`(配信) / `tests/cli.test.js`(CLI・同時編集) |
 
 テストは`index.html`の順にフロントのファイルを`vm`へ読み込み、`save`/`renderAll`をスタブにして`renderTodo()`などの戻り値(HTML文字列)を検証する。
 
@@ -45,7 +51,7 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 
 - `data` — 永続化されるモデル`{ clients, categories, projects, tasks, entries, filters }`。`data/enchanter-data.json`と同じ形(詳細は`README.md`の「データ構造」)。`end: null`の`entries`は計測中で、複数タスクを同時に計測できる
 - `ui` — タブ・日付範囲・絞り込み・編集中のidなど一時的な表示状態。永続化しない
-- 更新は必ず「`data`/`ui`を直接変更 → `save()` → `renderAll()`」。`save()`は`data`全体を`PUT /api/data`し、`saveChain`で直列化される。`renderAll()`はアクティブなタブの`render*()`が返すHTML文字列で`#view`を丸ごと置き換える(仮想DOMなし)。最後に`buildHash()`の結果を`history.replaceState`でURLに反映するので、変更ごとにハッシュを更新する必要はない。`applyHash()`が`init()`と`hashchange`でハッシュを検証して`ui`へ戻す
+- 更新は必ず「`data`/`ui`を直接変更 → `save()` → `renderAll()`」。`save()`は`data`全体を`PUT /api/data`し、`saveChain`で直列化される。CLIなど他の場所での変更を上書きしないよう、読み込み時のリビジョン(ファイル内容のハッシュ)を`If-Match`で送り、食い違えばサーバーが409を返して画面は最新を読み直す。画面は5秒ごとと再表示時に`/api/data/revision`を確認し、編集中でなければ外部の変更を取り込む(`checkExternalChange`)。`renderAll()`はアクティブなタブの`render*()`が返すHTML文字列で`#view`を丸ごと置き換える(仮想DOMなし)。最後に`buildHash()`の結果を`history.replaceState`でURLに反映するので、変更ごとにハッシュを更新する必要はない。`applyHash()`が`init()`と`hashchange`でハッシュを検証して`ui`へ戻す
 - `task.status`は`todo`→`in_progress`→`waiting_review`→`done`の順に巡回する(`TASK_STATUS_ORDER`)。`done`になったとき(`setTaskStatus`)だけ、計測中タイマーの停止と繰り返しタスクの次回分生成が起きる。タイマー開始で`todo`は`in_progress`になる
 - カテゴリはマスタ(`data.categories`)を`task.categoryId`で参照する。タグはマスタなしの文字列配列(`allTags()`で導出)
 
@@ -59,7 +65,7 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 信頼境界は「ポートに到達できる者すべて」。
 
 - 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
-- `PUT /api/data`と`readData()`は`sanitizeData()`を通す。`color`・`estimateMinutes`などクライアントが`esc()`なしでHTML属性に埋め込む値はここで形式を強制している。HTML属性に描画する列挙型の項目を追加するときは、サーバー側で検証するか描画時に`esc()`する
+- データファイルへの書き込みは必ず`store.js`の`writeData()`(内部で`sanitizeData()`を通す)を使う。`color`・`estimateMinutes`などクライアントが`esc()`なしでHTML属性に埋め込む値はここで形式を強制している。HTML属性に描画する列挙型の項目を追加するときは、サーバー側で検証するか描画時に`esc()`する
 - 静的ファイルは`/`・`/index.html`と、`/js/`・`/css/`直下の英小文字・数字・ハイフン名のファイルだけを配信する(`staticRouteFor()`)
 
 ### その他

@@ -619,6 +619,9 @@ window.addEventListener('hashchange', () => {
   renderAll();
 });
 
+// 別のウィンドウ(CLIを動かしているターミナルなど)から戻ってきたら、外部の変更を取り込む
+document.addEventListener('visibilitychange', checkExternalChange);
+
 // 数字キーで開くタブ
 const SHORTCUT_TABS = { 1: 'todo', 2: 'kanban', 3: 'timeline', 4: 'gantt', 5: 'report', 6: 'manage' };
 

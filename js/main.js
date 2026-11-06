@@ -15,6 +15,9 @@ setInterval(() => {
   });
 }, 1000);
 
+// CLIなど他の場所での変更を定期的に取り込む
+setInterval(checkExternalChange, EXTERNAL_CHANGE_CHECK_MS);
+
 /* ---------- init ---------- */
 
 async function init() {

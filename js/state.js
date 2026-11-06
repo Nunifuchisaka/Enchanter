@@ -50,6 +50,12 @@ const TASK_REMOVE_ANIMATION_MS = 450;
 // 保存失敗の通知を連発しないためのフラグと、保存を直列化する連鎖
 let saveWarned = false;
 let saveChain = Promise.resolve();
+// サーバー上のデータのリビジョン。保存時にIf-Matchで送り、CLIなど他の場所での変更を上書きしない
+let dataRevision = null;
+// 外部の変更を読み直すたびに増やす。読み直す前に積まれた保存は古いデータなので送らない
+let dataGeneration = 0;
+// 画面を開いたまま他の場所(CLI)で変更されていないかを確かめる間隔
+const EXTERNAL_CHANGE_CHECK_MS = 5000;
 // 変更操作で再描画された後に、同じ入力欄へフォーカスを戻すための情報
 let pendingFocusState = null;
 
@@ -100,6 +106,7 @@ function promoteStartedTasks() {
 async function loadFromServer() {
   const response = await fetch('/api/data');
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  dataRevision = response.headers.get('X-Data-Revision');
   return normalizeData(await response.json());
 }
 
@@ -112,14 +119,20 @@ async function fetchGoogleStatus() {
 // 保存はサーバーに直列で送る(連打しても順序が入れ替わらないように)
 function save() {
   const body = JSON.stringify(data);
+  const generation = dataGeneration;
   saveChain = saveChain
-    .then(() => fetch('/api/data', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
-      body,
-    }))
-    .then((response) => {
+    .then(async () => {
+      if (generation !== dataGeneration) return;
+      const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' };
+      if (dataRevision) headers['If-Match'] = dataRevision;
+      const response = await fetch('/api/data', { method: 'PUT', headers, body });
+      if (response.status === 409) {
+        await reloadAfterExternalChange();
+        alert('別の場所(CLIなど)でデータが更新されていたため、最新の内容を読み込みました。直前の操作は保存されていないので、もう一度行ってください。');
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      dataRevision = response.headers.get('X-Data-Revision') || dataRevision;
       saveWarned = false;
     })
     .catch((error) => {
@@ -129,6 +142,41 @@ function save() {
       }
       console.error('保存に失敗しました', error);
     });
+}
+
+// 他の場所(CLIなど)で変更されたデータを読み直して再描画する。取り消し履歴は古いデータを指すので捨てる
+async function reloadAfterExternalChange() {
+  dataGeneration += 1;
+  data = await loadFromServer();
+  deletionHistory.length = 0;
+  lastGanttDragUndo = null;
+  renderAll();
+}
+
+// 編集中・ドラッグ中・入力途中に再描画すると内容が消えるので、外部変更の取り込みは次の確認に回す
+function isUserBusy() {
+  const active = document.activeElement;
+  const typing = active && active.matches && (
+    active.matches('select') || (active.matches('input, textarea') && active.value !== '')
+  );
+  return Boolean(
+    ui.editingTask || ui.editingEntry || ui.editingClient || ui.editingProject || ui.editingCategory ||
+    kanbanDrag || ganttDrag || typing
+  );
+}
+
+// 画面を開いたまま他の場所で変更されていたら取り込む。保存と順序が入れ替わらないよう同じ連鎖に積む
+function checkExternalChange() {
+  if (dataRevision === null || document.hidden) return;
+  saveChain = saveChain
+    .then(async () => {
+      if (isUserBusy()) return;
+      const response = await fetch('/api/data/revision');
+      if (!response.ok) return;
+      const { revision } = await response.json();
+      if (revision !== dataRevision) await reloadAfterExternalChange();
+    })
+    .catch((error) => console.warn('データの更新確認に失敗しました', error));
 }
 
 // 旧localStorage版のデータが残っていて、かつファイル側が空なら移行を提案する

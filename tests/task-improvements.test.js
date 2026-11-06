@@ -102,8 +102,9 @@ test('daily backups retain original data and sanitize today/search fields', () =
     assert.equal(backups.length, 1);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'backups', backups[0]))).tasks.length, 0);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'enchanter-data.json'))).tasks[0].id, 'b');
-    assert.equal(run('sanitizeData({tasks:[{todayDate:"bad"}]}).tasks[0].todayDate'), null);
-    assert.equal(run('sanitizeData({tasks:[{todayDate:"2026-09-27"}]}).tasks[0].todayDate'), '2026-09-27');
+    const { sanitizeData } = require(path.join(root, 'store.js'));
+    assert.equal(sanitizeData({tasks:[{todayDate:'bad'}]}).tasks[0].todayDate, null);
+    assert.equal(sanitizeData({tasks:[{todayDate:'2026-09-27'}]}).tasks[0].todayDate, '2026-09-27');
   } finally {
     assert.equal(path.dirname(path.resolve(dir)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(dir).startsWith('enchanter-test-'));
