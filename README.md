@@ -182,7 +182,5 @@ bash mac/uninstall-launchagent.sh
 
 ### 初回セットアップ(どちらか一方)
 
-- **Claudeのサブスクリプション(Pro/Max)を使う場合**: 手元で `claude setup-token` を実行して表示されたトークンを、リポジトリの Settings → Secrets and variables → Actions → New repository secret に `CLAUDE_CODE_OAUTH_TOKEN` という名前で登録
+- **Claudeのサブスクリプション(Pro/Max)を使う場合**: 手元で `claude setup-token` を実行し(ブラウザでログイン後、約1年有効なトークンが表示される)、そのトークンを、リポジトリの Settings → Secrets and variables → Actions → New repository secret に `CLAUDE_CODE_OAUTH_TOKEN` という名前で登録
 - **APIキーを使う場合**: [Claude Console](https://console.anthropic.com/) で発行したAPIキーを `ANTHROPIC_API_KEY` という名前で登録
-
-あわせて、Settings → Actions → General → Workflow permissions が「Read and write permissions」になっていることを確認してください(マージとコメントに必要)。
