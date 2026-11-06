@@ -13,6 +13,11 @@ const { spawn } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 
+function clientScripts() {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  return [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+}
+
 function client() {
   const listeners = {};
   const context = vm.createContext({
@@ -24,7 +29,11 @@ function client() {
     alert: () => {},
     FormData: function(form) { return new Map(Object.entries(form.values)); },
   });
-  vm.runInContext(fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/init\(\);\s*$/, ''), context);
+  // ブラウザと同じく、index.htmlの読み込み順にファイルごと別スクリプトとして実行する(読み込み時の参照順の誤りも検出できる)
+  for (const file of clientScripts()) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    vm.runInContext(file === 'js/main.js' ? source.replace(/init\(\);\s*$/, '') : source, context, { filename: file });
+  }
   vm.runInContext('save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {};', context);
   return { context, listeners, run: (code) => vm.runInContext(code, context) };
 }
@@ -93,8 +102,9 @@ test('daily backups retain original data and sanitize today/search fields', () =
     assert.equal(backups.length, 1);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'backups', backups[0]))).tasks.length, 0);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'enchanter-data.json'))).tasks[0].id, 'b');
-    assert.equal(run('sanitizeData({tasks:[{todayDate:"bad"}]}).tasks[0].todayDate'), null);
-    assert.equal(run('sanitizeData({tasks:[{todayDate:"2026-09-27"}]}).tasks[0].todayDate'), '2026-09-27');
+    const { sanitizeData } = require(path.join(root, 'store.js'));
+    assert.equal(sanitizeData({tasks:[{todayDate:'bad'}]}).tasks[0].todayDate, null);
+    assert.equal(sanitizeData({tasks:[{todayDate:'2026-09-27'}]}).tasks[0].todayDate, '2026-09-27');
   } finally {
     assert.equal(path.dirname(path.resolve(dir)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(dir).startsWith('enchanter-test-'));

@@ -5,6 +5,7 @@
   "description": "タスク管理・時間計測ツール",
   "scripts": {
     "start": "node server.js",
+    "cli": "node cli.js",
     "test": "node --test"
   }
 }

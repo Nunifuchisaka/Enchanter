@@ -1,0 +1,232 @@
+/* Enchanter: ガントタブ */
+
+/* ---------- gantt ---------- */
+
+.gantt-wrap {
+  overflow: auto;
+  max-height: 70vh;
+  padding-bottom: 4px;
+}
+
+.gantt-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.gantt-board .card {
+  min-width: 0;
+}
+
+.gantt-v {
+  display: grid;
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.gantt-grid-row {
+  grid-row: 1 / -1;
+  border-left: 1px solid var(--border);
+  z-index: 0;
+}
+
+.gantt-grid-row.weekend {
+  background: var(--gantt-weekend);
+}
+
+.gantt-grid-row.today {
+  background: var(--accent-soft);
+}
+
+.gantt-month-v {
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+.gantt-day-v {
+  grid-row: 2;
+  position: sticky;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-sub);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.gantt-day-v .wd {
+  font-size: 12px;
+}
+
+.gantt-day-v.weekend {
+  background: linear-gradient(var(--gantt-weekend), var(--gantt-weekend)), var(--surface);
+}
+
+.gantt-day-v.today {
+  color: var(--accent);
+  font-weight: 700;
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
+}
+
+.gantt-corner-top {
+  grid-row: 1;
+  grid-column: 1;
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.gantt-corner {
+  grid-row: 2;
+  grid-column: 1;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 13px;
+  color: var(--text-sub);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.gantt-col-label {
+  grid-column: 1;
+  position: sticky;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  z-index: 3;
+}
+
+.gantt-col-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gantt-col-label .timer-btn {
+  flex-shrink: 0;
+  min-height: 0;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.gantt-col-label .chip-dot {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.gantt-col-label.done {
+  color: var(--text-sub);
+  text-decoration: line-through;
+}
+
+.gantt-col-label.waiting-review {
+  color: var(--review);
+  font-weight: 600;
+}
+
+.plan-task.in-progress,
+.gantt-col-label.in-progress {
+  color: var(--warning);
+}
+
+.gantt-col-project {
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.overdue-mark {
+  color: var(--danger);
+  text-decoration: none;
+}
+
+.gantt-bar-v {
+  align-self: center;
+  height: 60%;
+  min-width: 4px;
+  margin: 0 3px;
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  cursor: grab;
+  z-index: 2;
+  touch-action: none;
+  user-select: none;
+}
+
+.gantt-bar-v:hover {
+  filter: brightness(1.15);
+}
+
+.gantt-bar-v.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+
+.gantt-bar-v.done {
+  opacity: 0.4;
+}
+
+.gantt-bar-v.waiting-review {
+  box-shadow: 0 0 0 2px var(--review);
+}
+
+.gantt-bar-v.in-progress {
+  box-shadow: 0 0 0 2px var(--warning);
+}
+
+.gantt-bar-v.overdue {
+  box-shadow: 0 0 0 2px var(--danger);
+}
+
+.gantt-bar-v.clip-left {
+  margin-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.gantt-bar-v.clip-right {
+  margin-right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}

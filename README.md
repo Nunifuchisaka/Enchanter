@@ -65,7 +65,7 @@ bash mac/uninstall-launchagent.sh
 - タスク・作業記録の削除は、表示される「直前の削除を取り消す」で最大20回戻せます。タスクに付随する作業記録も復元します。履歴はページ再読み込みやインポートで消えます。
 - サーバーは各日の最初の保存時に、それまでのデータを `data/backups/enchanter-YYYY-MM-DD.json` に自動保存します（`DATA_DIR`指定時はその配下）。日付はサーバーのローカル日付で、同じ日のバックアップは上書きしません。認証情報は含まず、自動削除もしません。管理ページのインポートから復元できます。
 
-検証コマンド: `node --test tests/task-improvements.test.js`
+検証コマンド: `npm test`
 
 ### 各タブの機能
 
@@ -86,14 +86,32 @@ bash mac/uninstall-launchagent.sh
 | `N` | 新しいタスクを追加(Todoタブのタスク名入力へフォーカス) |
 | `Esc` | 編集をキャンセル |
 
+## コマンドラインからの操作(Claude Codeなど)
+
+サーバーを起動していなくても、`node cli.js` でタスクの追加・一覧・状態変更・計測などができます。データファイルを直接安全に書き換え(検証・日次バックアップあり)、画面を開いている場合は数秒で反映されます。出力は1件1行の短い形式で、Claude Codeから少ないトークンで操作できます。
+
+```
+node cli.js help                                   # コマンド一覧
+node cli.js add 請求書を送る -p Webサイト --start tomorrow -i 2 -t 経理
+node cli.js ls --today                             # 今日の対象タスク
+node cli.js start <id> / node cli.js stop          # 計測の開始/停止
+node cli.js done <id>                              # 完了(繰り返しタスクは次回分を生成)
+node cli.js sum --from -7                          # 直近1週間の作業時間
+```
+
+画面で保存しようとした時点でCLIによる変更が先に保存されていた場合は、上書きせずに最新の内容を読み込み直し、その旨を表示します(直前の操作はもう一度行ってください)。Googleカレンダー連携中は、CLIで確定した作業記録も起動中のサーバー経由で同期されます(サーバー未起動時は同期されません)。
+
 ## 構成
 
 | ファイル | 内容 |
 | --- | --- |
 | `server.js` | ローカルサーバー(静的配信 + データAPI、依存なし) |
-| `index.html` | ページ骨格 |
-| `style.css` | スタイル(ライト/ダークテーマ自動対応) |
-| `app.js` | アプリ本体(バニラJS、依存なし) |
+| `store.js` | データファイルの検証・読み書き・バックアップ(サーバーとCLIで共用) |
+| `cli.js` | コマンドラインからのタスク操作(サーバー不要) |
+| `index.html` | ページ骨格(`js/`・`css/`の読み込み順もここで決まる) |
+| `css/` | スタイル(ライト/ダークテーマ自動対応)。共通部品・タブごと・レスポンシブに分割 |
+| `js/` | アプリ本体(バニラJS、依存なし)。状態・ロジック・タブごとの描画・イベント処理に分割 |
+| `tests/` | テスト(`npm test`で実行) |
 | `start.cmd` | Windows用起動スクリプト |
 | `start.command` | Mac/Linux用起動スクリプト |
 | `Dockerfile` / `compose.yaml` | Docker起動用 |
@@ -103,8 +121,9 @@ bash mac/uninstall-launchagent.sh
 
 | メソッド | パス | 内容 |
 | --- | --- | --- |
-| GET | `/api/data` | 全データを取得 |
-| PUT | `/api/data` | 全データを保存 |
+| GET | `/api/data` | 全データを取得(`X-Data-Revision`ヘッダーにリビジョン) |
+| PUT | `/api/data` | 全データを保存(`If-Match`のリビジョンが古ければ409) |
+| GET | `/api/data/revision` | 現在のリビジョンを取得(画面が外部の変更を検出するため) |
 | GET | `/api/google/status` | Google連携の設定・接続状態を取得 |
 | GET | `/api/google/auth-url` | Google OAuth認可URLを取得 |
 | GET | `/oauth/callback` | Google OAuthのリダイレクト先(認可コード→トークン交換) |
