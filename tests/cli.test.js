@@ -143,6 +143,12 @@ test('a browser save based on stale data is rejected after the CLI writes', asyn
     const next = saved.headers['x-data-revision'];
     assert.equal(JSON.parse((await request(port, { urlPath: '/api/data/revision' })).body).revision, next);
 
+    // 形の崩れたペイロードは400で拒否し、サーバーは落ちない
+    for (const body of ['{"tasks":[null]}', '{"tasks":"x"}']) {
+      assert.equal((await request(port, { method: 'PUT', urlPath: '/api/data', headers: { 'X-Requested-With': 'enchanter' }, body })).status, 400);
+    }
+    assert.equal(JSON.parse((await request(port, { urlPath: '/api/data/revision' })).body).revision, next);
+
     assert.equal(cli(dir, 'add', 'CLIの変更').code, 0);
     const stale = await request(port, { method: 'PUT', urlPath: '/api/data', headers: { ...headers, 'If-Match': next }, body: loaded.body });
     assert.equal(stale.status, 409);

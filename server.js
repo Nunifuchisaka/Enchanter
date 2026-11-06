@@ -144,7 +144,16 @@ function handlePutData(req, res) {
       sendJson(res, 409, { error: '他の場所でデータが更新されています' }, { [REVISION_HEADER]: current });
       return;
     }
-    const revision = writeData(payload);
+    // readBodyのコールバックは非同期なので、ここで投げた例外はcreateServer側では捕まらずプロセスが落ちる。
+    // 形の崩れたペイロード(tasksが配列でない等)はsanitizeDataで例外になるため、必ずここで捕まえる
+    let revision;
+    try {
+      revision = writeData(payload);
+    } catch (error) {
+      console.error('データの保存に失敗しました', error);
+      sendJson(res, 400, { error: '不正なデータです' });
+      return;
+    }
     res.writeHead(204, { [REVISION_HEADER]: revision });
     res.end();
   });
