@@ -169,3 +169,20 @@ bash mac/uninstall-launchagent.sh
 - 同じ作業記録を再度更新すると、前回作成した予定を更新します(重複作成はされません)
 - 作業記録をアプリ側で削除しても、Googleカレンダー側の予定は自動削除されません(手動で削除してください)
 - 「連携を解除」ボタンで、保存済みのGoogleアカウントとの接続情報を削除できます
+
+## PRの自動レビュー・自動マージ
+
+`.github/workflows/auto-review-merge.yml` が、PRごとに次を自動で行います。
+
+1. テスト(`npm test`)と、Claudeによるコードレビューを並行実行
+2. レビュー結果をPRにコメント
+3. テストが通り、かつレビューが「問題なし」なら、そのPRをマージ(レビューしたコミットから変わっていない場合のみ)
+
+対象はこのリポジトリ内のブランチから出た、ドラフトではないPRです。ドラフトPRは「Ready for review」にした時点でレビューが始まります。レビュー後に追加pushすると、そのコミットで再レビューされます。マージさせたくないPRには `no-auto-merge` ラベルを付けてください(レビューのみ行います)。既存のPRは、Actionsタブの「Auto review & merge」→「Run workflow」でPR番号を指定して手動実行できます。
+
+### 初回セットアップ(どちらか一方)
+
+- **Claudeのサブスクリプション(Pro/Max)を使う場合**: 手元で `claude setup-token` を実行して表示されたトークンを、リポジトリの Settings → Secrets and variables → Actions → New repository secret に `CLAUDE_CODE_OAUTH_TOKEN` という名前で登録
+- **APIキーを使う場合**: [Claude Console](https://console.anthropic.com/) で発行したAPIキーを `ANTHROPIC_API_KEY` という名前で登録
+
+あわせて、Settings → Actions → General → Workflow permissions が「Read and write permissions」になっていることを確認してください(マージとコメントに必要)。
