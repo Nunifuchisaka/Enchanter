@@ -84,6 +84,12 @@ let ganttDrag = null;
 let lastGanttDragUndo = null;
 // 削除の取り消し履歴(ページを開いている間のみ、最大20件)
 const deletionHistory = [];
+// ゴミ箱を1回押して「もう一度押すと削除」の状態になっているタスクのid。一定時間で解除する
+let armedDeleteTaskId = null;
+let armedDeleteTimer = null;
+const ARMED_DELETE_MS = 3000;
+// 削除アニメーションの長さ(style.cssの.task-removingと合わせる)
+const TASK_REMOVE_ANIMATION_MS = 450;
 // 保存失敗の通知を連発しないためのフラグと、保存を直列化する連鎖
 let saveWarned = false;
 let saveChain = Promise.resolve();
@@ -661,17 +667,64 @@ function reorderKanbanTask(task, status, beforeId, afterId) {
   tasks.forEach((item, order) => { item.kanbanOrder = order; });
 }
 
+// 確認ダイアログは出さない。ゴミ箱の2回クリック(armTaskDelete)で確認し、取り消しバナーで戻せる
 function deleteTask(id) {
-  const entryCount = data.entries.filter((entry) => entry.taskId === id).length;
-  const message = entryCount > 0
-    ? `このタスクと ${entryCount} 件の作業記録を削除します。よろしいですか?`
-    : 'このタスクを削除します。よろしいですか?';
-  if (!confirm(message)) return;
   rememberDeletion(data.tasks.filter((task) => task.id === id), data.entries.filter((entry) => entry.taskId === id));
   data.tasks = data.tasks.filter((task) => task.id !== id);
   data.entries = data.entries.filter((entry) => entry.taskId !== id);
   save();
   renderAll();
+}
+
+// ゴミ箱の1回目のクリック。ボタンを目立たせ、一定時間内にもう一度押されたら削除する
+function armTaskDelete(id) {
+  disarmTaskDelete();
+  armedDeleteTaskId = id;
+  const button = taskDeleteButton(id);
+  if (button) {
+    button.classList.add('delete-armed');
+    button.setAttribute('aria-label', button.dataset.armedLabel);
+    button.title = button.dataset.armedLabel;
+  }
+  armedDeleteTimer = setTimeout(disarmTaskDelete, ARMED_DELETE_MS);
+}
+
+// 確認状態を解除する。再描画せずにボタンの見た目だけ戻す
+function disarmTaskDelete() {
+  clearTimeout(armedDeleteTimer);
+  armedDeleteTimer = null;
+  if (!armedDeleteTaskId) return;
+  const button = taskDeleteButton(armedDeleteTaskId);
+  armedDeleteTaskId = null;
+  if (button) {
+    button.classList.remove('delete-armed');
+    button.setAttribute('aria-label', button.dataset.label);
+    button.title = 'タスクを削除';
+  }
+}
+
+function taskDeleteButton(id) {
+  return [...document.querySelectorAll('[data-action="del-task"]')].find((button) => button.dataset.id === id) || null;
+}
+
+// ゴミ箱の2回目のクリック。行を消すアニメーションを見せてから削除する
+function removeTaskWithAnimation(id, button) {
+  disarmTaskDelete();
+  const row = button ? button.closest('.task-item') : null;
+  if (!row || row.classList.contains('task-removing')) {
+    if (!row) deleteTask(id);
+    return;
+  }
+  row.style.setProperty('--row-height', `${row.offsetHeight}px`);
+  row.classList.add('task-removing');
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    deleteTask(id);
+  };
+  row.addEventListener('animationend', (event) => { if (event.target === row) finish(); });
+  setTimeout(finish, TASK_REMOVE_ANIMATION_MS + 150); // animationendが来ない場合の保険
 }
 
 function deleteSubtask(taskId, subtaskId) {
@@ -1310,9 +1363,20 @@ function todoTaskRow(task, now) {
         ${todoTimerControls(task, running, now)}
         ${task.status !== 'done' ? `<button class="btn" data-action="toggle-today" data-id="${esc(task.id)}" aria-pressed="${isToday}">${isToday ? '★ 今日やる' : '☆ 今日やる'}</button>` : ''}
         <button class="btn-icon" data-action="edit-task" data-id="${esc(task.id)}" title="タスクを編集" aria-label="${esc(task.title)}を編集">✎</button>
-        <button class="btn-icon danger" data-action="del-task" data-id="${esc(task.id)}" title="タスクを削除" aria-label="${esc(task.title)}を削除">🗑</button>
+        ${taskDeleteButtonHtml(task)}
       </div>
     </li>`;
+}
+
+// タスクの削除ボタン。1回目のクリックで確認状態(.delete-armed)になり、2回目で削除する
+function taskDeleteButtonHtml(task) {
+  const entryCount = data.entries.filter((entry) => entry.taskId === task.id).length;
+  const label = `${task.title}を削除`;
+  const armedLabel = `もう一度クリックで「${task.title}」を削除${entryCount > 0 ? `(作業記録 ${entryCount} 件も削除)` : ''}`;
+  const armed = armedDeleteTaskId === task.id;
+  return `<button class="btn-icon danger task-delete${armed ? ' delete-armed' : ''}" data-action="del-task" data-id="${esc(task.id)}"
+    data-label="${esc(label)}" data-armed-label="${esc(armedLabel)}"
+    title="${armed ? esc(armedLabel) : 'タスクを削除'}" aria-label="${esc(armed ? armedLabel : label)}"><span class="task-delete-icon" aria-hidden="true">🗑</span><span class="task-delete-confirm" aria-hidden="true">削除?</span></button>`;
 }
 
 // 状態ごとの節。未着手は常に出し、作業中・確認待ちは該当がある時だけ出す
@@ -2565,6 +2629,10 @@ function clearInsertMarkers() {
 
 document.addEventListener('click', (event) => {
   const element = event.target.closest('[data-action]');
+  // 削除の確認状態は、そのゴミ箱以外のどこかをクリックしたら解除する
+  if (armedDeleteTaskId && !(element && element.dataset.action === 'del-task' && element.dataset.id === armedDeleteTaskId)) {
+    disarmTaskDelete();
+  }
   if (!element) return;
   const action = element.dataset.action;
   const id = element.dataset.id;
@@ -2619,7 +2687,8 @@ document.addEventListener('click', (event) => {
       break;
     }
     case 'del-task':
-      deleteTask(id);
+      if (armedDeleteTaskId === id) removeTaskWithAnimation(id, element);
+      else armTaskDelete(id);
       return;
     case 'delete-filter': {
       if (!confirm('この保存済みフィルターを削除します。よろしいですか?')) return;
@@ -3202,6 +3271,10 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape') {
+    if (armedDeleteTaskId) {
+      disarmTaskDelete();
+      return;
+    }
     if (ui.editingTask || ui.editingEntry || ui.editingClient || ui.editingProject || ui.editingCategory) {
       clearEditing();
       renderAll();

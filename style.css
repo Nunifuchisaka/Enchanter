@@ -479,6 +479,52 @@ input[type="radio"] {
   border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
 }
 
+/* タスク削除: 1回目のクリックで確認状態、2回目で削除 */
+.task-delete {
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.task-delete-confirm {
+  display: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.task-delete.delete-armed,
+.task-delete.delete-armed:hover {
+  width: auto;
+  flex-basis: auto;
+  padding: 0 10px;
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+  animation: delete-armed-pulse 0.9s ease-in-out infinite;
+}
+
+.task-delete.delete-armed .task-delete-confirm {
+  display: inline;
+}
+
+.task-delete.delete-armed .task-delete-icon {
+  display: inline-block;
+  animation: delete-armed-wiggle 0.45s ease-in-out;
+}
+
+@keyframes delete-armed-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 55%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 0%, transparent); }
+}
+
+@keyframes delete-armed-wiggle {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-18deg); }
+  50% { transform: rotate(14deg); }
+  75% { transform: rotate(-8deg); }
+}
+
+
 /* ---------- form fields ---------- */
 
 .field {
@@ -844,6 +890,46 @@ fieldset.field {
   border-radius: var(--radius-sm);
   background: var(--warning-soft);
   box-shadow: inset 3px 0 0 var(--warning);
+}
+
+.task-item:has(.delete-armed) {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+/* 2回目のクリック: 赤く光って横へ滑り出し、行の高さを畳んで消える(app.jsのTASK_REMOVE_ANIMATION_MSと合わせる) */
+.task-item.task-removing {
+  pointer-events: none;
+  overflow: hidden;
+  animation: task-remove 0.45s cubic-bezier(0.5, 0, 0.75, 0) forwards;
+}
+
+@keyframes task-remove {
+  0% {
+    max-height: var(--row-height);
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    background: var(--danger-soft);
+  }
+  25% {
+    transform: translateX(-6px) scale(1.01);
+    background: color-mix(in srgb, var(--danger) 30%, transparent);
+  }
+  65% {
+    max-height: var(--row-height);
+    opacity: 0;
+    transform: translateX(40px) scale(0.96);
+    padding-top: 13px;
+    padding-bottom: 13px;
+  }
+  100% {
+    max-height: 0;
+    opacity: 0;
+    transform: translateX(40px) scale(0.96);
+    padding-top: 0;
+    padding-bottom: 0;
+    border-width: 0;
+  }
 }
 
 .status-toggle {
