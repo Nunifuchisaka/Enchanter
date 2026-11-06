@@ -13,6 +13,11 @@ const { spawn } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 
+function clientScripts() {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  return [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+}
+
 function client() {
   const listeners = {};
   const context = vm.createContext({
@@ -24,7 +29,11 @@ function client() {
     alert: () => {},
     FormData: function(form) { return new Map(Object.entries(form.values)); },
   });
-  vm.runInContext(fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/init\(\);\s*$/, ''), context);
+  // ブラウザと同じく、index.htmlの読み込み順にファイルごと別スクリプトとして実行する(読み込み時の参照順の誤りも検出できる)
+  for (const file of clientScripts()) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    vm.runInContext(file === 'js/main.js' ? source.replace(/init\(\);\s*$/, '') : source, context, { filename: file });
+  }
   vm.runInContext('save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {};', context);
   return { context, listeners, run: (code) => vm.runInContext(code, context) };
 }

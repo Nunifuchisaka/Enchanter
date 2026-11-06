@@ -65,7 +65,7 @@ bash mac/uninstall-launchagent.sh
 - タスク・作業記録の削除は、表示される「直前の削除を取り消す」で最大20回戻せます。タスクに付随する作業記録も復元します。履歴はページ再読み込みやインポートで消えます。
 - サーバーは各日の最初の保存時に、それまでのデータを `data/backups/enchanter-YYYY-MM-DD.json` に自動保存します（`DATA_DIR`指定時はその配下）。日付はサーバーのローカル日付で、同じ日のバックアップは上書きしません。認証情報は含まず、自動削除もしません。管理ページのインポートから復元できます。
 
-検証コマンド: `node --test tests/task-improvements.test.js`
+検証コマンド: `npm test`
 
 ### 各タブの機能
 
@@ -91,9 +91,10 @@ bash mac/uninstall-launchagent.sh
 | ファイル | 内容 |
 | --- | --- |
 | `server.js` | ローカルサーバー(静的配信 + データAPI、依存なし) |
-| `index.html` | ページ骨格 |
-| `style.css` | スタイル(ライト/ダークテーマ自動対応) |
-| `app.js` | アプリ本体(バニラJS、依存なし) |
+| `index.html` | ページ骨格(`js/`・`css/`の読み込み順もここで決まる) |
+| `css/` | スタイル(ライト/ダークテーマ自動対応)。共通部品・タブごと・レスポンシブに分割 |
+| `js/` | アプリ本体(バニラJS、依存なし)。状態・ロジック・タブごとの描画・イベント処理に分割 |
+| `tests/` | テスト(`npm test`で実行) |
 | `start.cmd` | Windows用起動スクリプト |
 | `start.command` | Mac/Linux用起動スクリプト |
 | `Dockerfile` / `compose.yaml` | Docker起動用 |

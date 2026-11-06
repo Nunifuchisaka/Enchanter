@@ -2,7 +2,7 @@
 
 /* ============================================================
  * Enchanter - ローカルサーバー
- * 静的ファイルの配信と、データのJSONファイル保存を行う。
+ * 静的ファイル(index.html・js/・css/)の配信と、データのJSONファイル保存を行う。
  * 依存パッケージなし。`node server.js` で起動。
  * ============================================================ */
 
@@ -30,9 +30,16 @@ const FILTER_LEVELS = ['', '0', '1', '2', '3'];
 const STATIC_ROUTES = {
   '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
   '/index.html': { file: 'index.html', type: 'text/html; charset=utf-8' },
-  '/style.css': { file: 'style.css', type: 'text/css; charset=utf-8' },
-  '/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8' },
 };
+// js/・css/直下のファイルだけを配信する。名前を英小文字・数字・ハイフンに限定してパストラバーサルを防ぐ
+const ASSET_RE = /^\/(js|css)\/[a-z0-9-]+\.\1$/;
+const ASSET_TYPES = { js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' };
+
+function staticRouteFor(pathname) {
+  if (STATIC_ROUTES[pathname]) return STATIC_ROUTES[pathname];
+  const match = ASSET_RE.exec(pathname);
+  return match ? { file: pathname.slice(1), type: ASSET_TYPES[match[1]] } : null;
+}
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -495,8 +502,9 @@ function handleSyncEntryRequest(req, res) {
 function serveStatic(res, { file, type }) {
   fs.readFile(path.join(__dirname, file), (error, buffer) => {
     if (error) {
-      res.writeHead(500);
-      res.end('Internal Server Error');
+      const missing = error.code === 'ENOENT';
+      res.writeHead(missing ? 404 : 500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(missing ? 'Not Found' : 'Internal Server Error');
       return;
     }
     res.writeHead(200, { 'Content-Type': type });
@@ -548,7 +556,7 @@ function routeRequest(req, res) {
   }
 
   // ---- 静的ファイル ----
-  const route = STATIC_ROUTES[url.pathname];
+  const route = staticRouteFor(url.pathname);
   if (req.method === 'GET' && route) {
     serveStatic(res, route);
     return;

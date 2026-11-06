@@ -1,0 +1,356 @@
+/* Enchanter: レスポンシブ・アクセシビリティ(全タブを上書きするので最後に読み込む) */
+
+/* ---------- responsive / accessibility ---------- */
+
+@media (max-width: 1040px) {
+  .create-primary {
+    grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) minmax(140px, 0.55fr);
+  }
+
+  .create-primary.no-category {
+    grid-template-columns: minmax(220px, 1fr) auto;
+  }
+
+  .create-primary .field-title {
+    grid-column: 1 / -1;
+  }
+
+  .create-primary .create-submit {
+    grid-column: -2 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px 14px;
+    padding-block: 10px;
+  }
+
+  .tabs {
+    grid-column: 1 / -1;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab-btn {
+    flex: 1 0 auto;
+  }
+
+  .create-details-grid {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
+  .filter-grid {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --control-height: 44px;
+  }
+
+  body {
+    font-size: 14px;
+  }
+
+  .app-header {
+    padding-inline: 12px;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .running-box {
+    min-height: 36px;
+  }
+
+  .running-inner {
+    max-width: calc(100vw - 178px);
+  }
+
+  .running-task {
+    max-width: 126px;
+  }
+
+  .running-project {
+    display: none;
+  }
+
+  .view {
+    padding: 14px 10px 40px;
+  }
+
+  .card {
+    padding: 16px;
+    margin-bottom: 14px;
+    border-radius: var(--radius);
+  }
+
+  .card h2 {
+    font-size: 17px;
+  }
+
+  .card-heading {
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .shortcut-hint,
+  .task-overview {
+    font-size: 11px;
+  }
+
+  .create-primary {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .create-primary.no-category {
+    grid-template-columns: 1fr;
+  }
+
+  .create-primary .field-title,
+  .create-primary .create-submit {
+    grid-column: auto;
+  }
+
+  .create-submit {
+    width: 100%;
+  }
+
+  .create-details-grid,
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .create-details-grid .field-wide,
+  .filter-grid .field-project {
+    grid-column: auto;
+  }
+
+  .create-details .plan-inputs {
+    display: grid;
+    grid-template-columns: minmax(130px, 1fr) minmax(88px, 0.55fr);
+    width: 100%;
+  }
+
+  .create-details .plan-inputs > span {
+    display: none;
+  }
+
+  .plan-inputs input[type="date"],
+  .plan-inputs select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .filter-panel {
+    margin-inline: -4px;
+    padding: 14px;
+  }
+
+  .filter-panel-heading {
+    align-items: flex-start;
+  }
+
+  .filter-save-row,
+  .save-filter-form {
+    width: 100%;
+  }
+
+  .filter-save-row > .btn-quiet {
+    flex: 1;
+  }
+
+  .save-filter-form input[type="text"] {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .task-item {
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 13px 8px;
+  }
+
+  .status-toggle {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+    border-radius: 12px;
+  }
+
+  .task-main {
+    width: calc(100% - 54px);
+    flex: 1 1 calc(100% - 54px);
+  }
+
+  .task-actions {
+    width: calc(100% - 54px);
+    margin-left: 54px;
+    justify-content: flex-end;
+  }
+
+  .task-item > .edit-form,
+  .task-item > .subtask-block {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .btn-icon {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
+  }
+
+  .timer-btn {
+    min-height: 42px;
+  }
+
+  .edit-form > input[type="text"],
+  .edit-form > textarea {
+    flex-basis: 100%;
+  }
+
+  .tl-header {
+    gap: 6px;
+  }
+
+  .tl-date-label {
+    flex-basis: 100%;
+    font-size: 17px;
+  }
+
+  .timeline-wrap {
+    max-height: 68vh;
+  }
+
+  .entry-item {
+    gap: 6px 10px;
+  }
+
+  .entry-task {
+    flex-basis: 100%;
+    order: 3;
+  }
+
+  .entry-item .task-actions {
+    order: 4;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .report-controls input {
+    flex: 1;
+    min-width: 130px;
+  }
+
+  .quick-ranges {
+    gap: 8px;
+  }
+
+  .quick-ranges .btn {
+    min-height: 40px;
+  }
+
+  .export-btns {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .export-btns .btn {
+    flex: 1;
+  }
+
+  .report-total {
+    font-size: 21px;
+  }
+
+  .manage-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand-tagline {
+    display: none;
+  }
+
+  .brand h1 {
+    font-size: 16px;
+  }
+
+  .tab-btn {
+    flex: 0 0 auto;
+    min-width: 82px;
+    padding-inline: 10px;
+  }
+
+  .running-inner {
+    max-width: calc(100vw - 150px);
+  }
+
+  .card-heading {
+    align-items: flex-start;
+  }
+
+  .shortcut-hint {
+    display: none;
+  }
+
+  .task-overview {
+    max-width: 130px;
+    white-space: normal;
+    text-align: right;
+  }
+
+  .filter-panel-heading {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .create-details .plan-inputs {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-bar-row {
+    grid-template-columns: 78px minmax(70px, 1fr) 76px;
+    gap: 5px;
+  }
+
+  .chart-bar-value {
+    white-space: normal;
+  }
+
+  .manage-item .sub {
+    flex-basis: 100%;
+    order: 4;
+    padding-left: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .running-dot {
+    animation: none;
+  }
+}
