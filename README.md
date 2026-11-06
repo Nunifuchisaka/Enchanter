@@ -172,15 +172,25 @@ bash mac/uninstall-launchagent.sh
 
 ## PRの自動レビュー・自動マージ
 
-`.github/workflows/auto-review-merge.yml` が、PRごとに次を自動で行います。
+`.github/workflows/auto-review-merge.yml`(呼び出し側)から、共通の本体 `.github/workflows/claude-review-reusable.yml` を呼び出して、PRごとに次を自動で行います。本体はEnchanterにだけ置かれており、他のリポジトリにも同じ呼び出しファイルを置けば同じ仕組みで動きます(本体を直すと全リポジトリに反映されます。他のリポジトリから呼び出せるのは、Enchanterがpublicリポジトリだからです)。
 
-1. テスト(`npm test`)と、Claudeによるコードレビューを並行実行
+1. テスト(`package.json` に `test` スクリプトがあれば `npm test`、なければなし)と、Claudeによるコードレビューを並行実行
 2. レビュー結果をPRにコメント
 3. テストが通り、かつレビューが「問題なし」なら、そのPRをマージ(レビューしたコミットから変わっていない場合のみ)
 
-対象はこのリポジトリ内のブランチから出た、ドラフトではないPRです。ドラフトPRは「Ready for review」にした時点でレビューが始まります。レビュー後に追加pushすると、そのコミットで再レビューされます。マージさせたくないPRには `no-auto-merge` ラベルを付けてください(レビューのみ行います)。既存のPRは、Actionsタブの「Auto review & merge」→「Run workflow」でPR番号を指定して手動実行できます。
+対象はそのリポジトリ内のブランチから出た、ドラフトではないPRです。ドラフトPRは「Ready for review」にした時点でレビューが始まります。レビュー後に追加pushすると、そのコミットで再レビューされます。次のPRはレビューのみ行い、マージは手動です。
 
-### 初回セットアップ(どちらか一方)
+- `no-auto-merge` ラベルを付けたPR
+- `.github/` 配下(ワークフローなど)を変更するPR(PRの中でレビュー条件を書き換えて自動マージさせられないようにするため)
 
-- **Claudeのサブスクリプション(Pro/Max)を使う場合**: 手元で `claude setup-token` を実行し(ブラウザでログイン後、約1年有効なトークンが表示される)、そのトークンを、リポジトリの Settings → Secrets and variables → Actions → New repository secret に `CLAUDE_CODE_OAUTH_TOKEN` という名前で登録
-- **APIキーを使う場合**: [Claude Console](https://console.anthropic.com/) で発行したAPIキーを `ANTHROPIC_API_KEY` という名前で登録
+既存のPRは、Actionsタブの「Auto review & merge」→「Run workflow」でPR番号を指定して手動実行できます。
+
+### セットアップ
+
+`claude setup-token` を実行し(ブラウザでClaude Pro/Maxのアカウントにログインすると、約1年有効なトークンが表示される)、そのトークンをリポジトリの Settings → Secrets and variables → Actions → Repository secrets に `CLAUDE_CODE_OAUTH_TOKEN` という名前で登録します(APIキーを使う場合は `ANTHROPIC_API_KEY`)。
+
+全リポジトリにまとめて展開する場合は、[GitHub CLI](https://cli.github.com/) にログインした状態で次を実行します。シークレットの登録と呼び出しファイルの追加を、フォーク・アーカイブ済みを除く全リポジトリに行います。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy-auto-review.ps1
+```
