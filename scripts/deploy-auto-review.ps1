@@ -1,4 +1,4 @@
-# PRの自動レビュー＋自動マージを、自分の全リポジトリに展開するスクリプト(Windows PowerShell)
+﻿# PRの自動レビュー＋自動マージを、自分の全リポジトリに展開するスクリプト(Windows PowerShell)
 #
 # やること(リポジトリごと):
 #   1. シークレット CLAUDE_CODE_OAUTH_TOKEN を登録(上書き)
@@ -38,7 +38,7 @@ if ($Repos) {
 $ok = @(); $ng = @()
 foreach ($r in $targets) {
   Write-Host "== $r"
-  $token | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo $r
+  gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo $r --body $token
   if ($LASTEXITCODE -ne 0) { $ng += "$r (シークレット登録失敗)"; continue }
 
   $sha = gh api "repos/$r/contents/$path" -q .sha 2>$null
