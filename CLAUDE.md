@@ -16,7 +16,7 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 
 ## トークンを節約するための作業ルール
 
-- `data/`配下のファイルは直接読まない(`enchanter-data.json`は`.claude/settings.json`でdeny済み。`backups/`やGoogle認証情報も同様)。データの確認・変更は`cli.js`を使う。コードの動作確認には一時ディレクトリを`DATA_DIR`に指定してサンプルデータを使う
+- `data/`配下のファイルは直接読まない(`.claude/settings.json`でdenyしているのは`enchanter-data.json`だけだが、`backups/`やGoogle認証情報も読まない)。データの確認・変更は`cli.js`を使う。コードの動作確認には一時ディレクトリを`DATA_DIR`に指定してサンプルデータを使う
 - 変更したい画面・機能から下の「ファイルマップ」で対象ファイルを決め、そのファイルだけを読む。関数を探すときは`Grep`で定義行(`^function 名前`)を見つけてから`Read`の`offset`/`limit`で必要な範囲だけ読む
 - `README.md`はエンドユーザー向け。データ構造(スキーマ)を確認するとき以外は読まなくてよい
 
