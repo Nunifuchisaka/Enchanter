@@ -158,3 +158,25 @@ test('a browser save based on stale data is rejected after the CLI writes', asyn
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('links can be added, appended, removed and cleared from the CLI', () => {
+  const dir = tempDataDir(SAMPLE);
+  try {
+    const added = cli(dir, 'add', '資料付き', '-l', '仕様書 https://example.com/spec', '-l', 'https://example.com/b');
+    assert.equal(added.code, 0, added.err);
+    assert.ok(added.out.endsWith('資料付き 🔗2'));
+    const id = readFile(dir).tasks.find((task) => task.title === '資料付き').id;
+    assert.equal(cli(dir, 'edit', id, '--link', 'https://example.com/c').code, 0);
+    assert.deepEqual(readFile(dir).tasks.find((task) => task.id === id).links.map((link) => link.url),
+      ['https://example.com/spec', 'https://example.com/b', 'https://example.com/c']);
+    assert.ok(cli(dir, 'show', id).out.includes('link 1: 仕様書 https://example.com/spec'));
+    assert.equal(cli(dir, 'edit', id, '--unlink', '2').code, 0);
+    assert.equal(readFile(dir).tasks.find((task) => task.id === id).links.length, 2);
+    const bad = cli(dir, 'edit', id, '-l', 'javascript:alert(1)');
+    assert.notEqual(bad.code, 0);
+    assert.equal(cli(dir, 'edit', id, '-l', '-').code, 0);
+    assert.deepEqual(readFile(dir).tasks.find((task) => task.id === id).links, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

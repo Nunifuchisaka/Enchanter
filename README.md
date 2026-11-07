@@ -138,7 +138,7 @@ node cli.js sum --from -7                          # 直近1週間の作業時�
   "clients": [{ "id": "...", "name": "..." }],
   "categories": [{ "id": "...", "name": "開発" }],
   "projects": [{ "id": "...", "name": "...", "customId": "...", "clientId": "...", "color": "#7c5cff" }],
-  "tasks": [{ "id": "...", "title": "...", "projectId": "...", "categoryId": "...", "status": "todo", "createdAt": 0, "completedAt": null, "plannedStart": "2026-07-05", "plannedEnd": "2026-07-07", "importance": 3, "weight": 2, "estimateMinutes": 120, "note": "自由記述メモ", "tags": ["デザイン", "急ぎ"], "subtasks": [{ "id": "...", "title": "...", "done": false }] }],
+  "tasks": [{ "id": "...", "title": "...", "projectId": "...", "categoryId": "...", "status": "todo", "createdAt": 0, "completedAt": null, "plannedStart": "2026-07-05", "plannedEnd": "2026-07-07", "importance": 3, "weight": 2, "estimateMinutes": 120, "note": "自由記述メモ", "tags": ["デザイン", "急ぎ"], "links": [{ "url": "https://example.com/spec", "title": "仕様書" }], "subtasks": [{ "id": "...", "title": "...", "done": false }] }],
   "entries": [{ "id": "...", "taskId": "...", "start": 0, "end": null }],
   "filters": [{ "id": "...", "name": "今週の高重要度", "clientId": null, "projectId": "...", "categoryId": null, "importance": "3", "weight": "", "month": "", "tag": "" }]
 }
@@ -149,6 +149,8 @@ node cli.js sum --from -7                          # 直近1週間の作業時�
 `weight`(重さ)は`importance`(重要度)とは独立したタスクの負荷感の指標で、`0`(指定なし)〜`3`(重い)の整数です。並び順には影響せず、絞り込み・保存済みフィルターの対象になるだけです。
 
 `tags` はタスクに付ける自由入力のラベル(文字列配列)です。タグのマスタは持たず、全タスクの`tags`から使用中の一覧を導出します。
+
+`links` はタスクの資料リンク(`url`と任意の`title`)の配列です。`url`はhttp/httpsのみ保存されます。画面ではタスクの編集フォーム(または新規作成の詳細設定)に1行1件で「タイトル URL」またはURLだけを入力し、タスク行のリンクをクリックすると新しいタブで開きます。
 
 `categories` は「管理」タブで予め作成するカテゴリのマスタです。各タスクは`categoryId`でひとつのカテゴリを参照できます(未設定は`null`)。カテゴリを削除すると、参照していたタスクの`categoryId`は`null`(カテゴリなし)に戻ります。
 

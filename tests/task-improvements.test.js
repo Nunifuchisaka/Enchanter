@@ -21,7 +21,7 @@ function clientScripts() {
 function client() {
   const listeners = {};
   const context = vm.createContext({
-    console, URLSearchParams, structuredClone,
+    console, URL, URLSearchParams, structuredClone,
     setInterval() {},
     window: { addEventListener() {}, matchMedia: () => ({ matches: false }) },
     document: { addEventListener: (event, fn) => { listeners[event] = fn; } },
@@ -262,7 +262,7 @@ test('gantt rows offer the same start and stop timer buttons as the todo tab', (
 test('an edit made while an external-change check is running is not dropped silently', async () => {
   const alerts = [];
   const context = vm.createContext({
-    console, URLSearchParams, structuredClone, setInterval() {},
+    console, URL, URLSearchParams, structuredClone, setInterval() {},
     window: { addEventListener() {} },
     document: { addEventListener() {}, hidden: false, activeElement: null },
     alert: (message) => alerts.push(message),
@@ -284,4 +284,39 @@ test('an edit made while an external-change check is running is not dropped sile
   await vm.runInContext('saveChain', context);
   assert.equal(alerts.length, 1);
   assert.equal(vm.runInContext("data.tasks.map((task) => task.id).join()", context), 'cli-task');
+});
+
+test('task links: form input is parsed, unsafe URLs are dropped, chips open in a new tab', () => {
+  const { run } = client();
+  const links = run(`parseLinks('仕様書 https://example.com/spec?a=1&b=2\\nhttps://docs.example.com/x\\njavascript:alert(1)\\nhttps://example.com/spec?a=1&b=2\\nメモだけ')`);
+  assert.deepEqual(JSON.parse(JSON.stringify(links)), [
+    { url: 'https://example.com/spec?a=1&b=2', title: '仕様書' },
+    { url: 'https://docs.example.com/x', title: null },
+  ]);
+  run(`data.tasks = [{id:'t', title:'T', status:'todo', links:${JSON.stringify(links)}}];`);
+  assert.equal(run('linksToText(data.tasks[0].links)'), '仕様書 https://example.com/spec?a=1&b=2\nhttps://docs.example.com/x');
+  const html = run('renderTodo()');
+  assert.ok(html.includes('href="https://example.com/spec?a=1&amp;b=2" target="_blank" rel="noopener noreferrer"'));
+  assert.ok(html.includes('🔗 docs.example.com'));
+  run("ui.todoSearch = 'docs.example';");
+  assert.equal(run('applyTodoFilters(data.tasks).length'), 1);
+  run("ui.todoSearch = ''; ui.editingTask = 't';");
+  assert.ok(run('renderTodo()').includes('name="links"'));
+});
+
+test('sanitizeData keeps only http(s) links with normalized titles', () => {
+  const { sanitizeData } = require(path.join(root, 'store.js'));
+  const task = sanitizeData({ tasks: [{ id: 'a', links: [
+    { url: 'https://example.com', title: '  資料 ' },
+    { url: 'javascript:alert(1)', title: 'x' },
+    { url: 'not a url' },
+    { url: 'https://example.com/', title: 'dup' },
+    'https://bare.example.com',
+    { url: 'http://b.example.com/a"b', title: '' },
+  ] }] }).tasks[0];
+  assert.deepEqual(task.links, [
+    { url: 'https://example.com/', title: '資料' },
+    { url: 'http://b.example.com/a%22b', title: null },
+  ]);
+  assert.deepEqual(sanitizeData({ tasks: [{ id: 'b' }] }).tasks[0].links, []);
 });

@@ -42,6 +42,7 @@ function kanbanCard(task) {
         <div class="kanban-card-meta">
           ${commonTaskChips(task)}
           ${tagChips(task)}
+          ${(task.links || []).length ? `<span class="chip" title="資料リンク">🔗 ${task.links.length}</span>` : ''}
           ${subtasks.length ? `<span class="chip">☑ ${doneCount}/${subtasks.length}</span>` : ''}
           ${running ? '<span class="chip kanban-running">● 計測中</span>' : ''}
         </div>

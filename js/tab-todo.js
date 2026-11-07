@@ -52,6 +52,7 @@ function todoTaskEditRow(task) {
           </span>
           <input type="text" name="tags" value="${esc((task.tags || []).join(', '))}" placeholder="タグ(カンマ区切り)" aria-label="タグ" autocomplete="off">
           <textarea name="note" rows="2" placeholder="メモ(任意)" aria-label="メモ">${esc(task.note || '')}</textarea>
+          <textarea name="links" rows="2" placeholder="資料リンク(1行に1件。「タイトル URL」またはURLのみ)" aria-label="資料リンク">${esc(linksToText(task.links))}</textarea>
           <button class="btn btn-primary" type="submit">保存</button>
           <button class="btn" type="button" data-action="cancel-edit">キャンセル</button>
         </form>
@@ -111,6 +112,7 @@ function todoTaskRow(task, now) {
           ${commonTaskChips(task)}
           ${repeatChip(task)}
           ${tagChips(task)}
+          ${linkChips(task)}
           ${totalChip(task, totalMs)}
         </div>
         ${subtaskBlockHtml(task)}
@@ -221,6 +223,9 @@ function todoCreateCard() {
             </label>
             <label class="field field-tags"><span class="field-label">タグ</span>
               <input type="text" name="tags" placeholder="デザイン, 急ぎ" autocomplete="off">
+            </label>
+            <label class="field field-wide"><span class="field-label">資料リンク（1行に1件。「タイトル URL」またはURLのみ）</span>
+              <textarea name="links" rows="2" placeholder="仕様書 https://example.com/spec"></textarea>
             </label>
           </div>
         </details>

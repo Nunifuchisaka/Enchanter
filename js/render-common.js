@@ -182,6 +182,11 @@ function tagChips(task) {
   return (task.tags || []).map((tag) => `<span class="chip tag-chip">🏷 ${esc(tag)}</span>`).join('');
 }
 
+// 資料リンク。新しいタブで開き、遷移先に元ページを渡さない
+function linkChips(task) {
+  return (task.links || []).map((link) => `<a class="chip link-chip" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" title="${esc(link.url)}">🔗 ${esc(linkLabel(link))}</a>`).join('');
+}
+
 // 累計時間の表示(見積があれば「累計/見積」+進捗バー、超過時は警告色)
 function totalChip(task, totalMs) {
   if (!task.estimateMinutes) {

@@ -36,8 +36,9 @@ const HELP = `Enchanter CLI (サーバー不要。起動中の画面には数秒
 マスタ projects  (クライアント/プロジェクト/カテゴリ)
 オプション: -p プロジェクト -c カテゴリ --start 日付[T時刻] --end 日付[T時刻] -i 重要度0-3 -w 重さ0-3
   -e 見積(分) -t タグ(カンマ区切り) --note メモ -r daily|weekly|monthly
+  -l 資料リンク("URL" か "タイトル URL"。複数回可。editでは追加、-l - で全消去) --unlink 番号(editで削除)
 日付: YYYY-MM-DD, M/D, today, tomorrow, +N, -N   id/プロジェクト名は一意なら前方一致・部分一致で可
-一覧の形式: id 状態 [!重要度] タイトル [@プロジェクト] [#タグ] [予定] [実績/見積] [☆今日] [▶計測中] [小項目 済/全]`;
+一覧の形式: id 状態 [!重要度] タイトル [@プロジェクト] [#タグ] [予定] [実績/見積] [☆今日] [▶計測中] [🔗リンク数] [小項目 済/全]`;
 
 const STATUS_ALIASES = {
   todo: 'todo', wip: 'in_progress', doing: 'in_progress', in_progress: 'in_progress',
@@ -46,7 +47,7 @@ const STATUS_ALIASES = {
 const VALUE_OPTIONS = {
   p: 'project', project: 'project', c: 'category', category: 'category', start: 'start', end: 'end',
   i: 'importance', importance: 'importance', w: 'weight', weight: 'weight', e: 'estimate', estimate: 'estimate',
-  t: 'tags', tags: 'tags', tag: 'tags', note: 'note', r: 'repeat', repeat: 'repeat', title: 'title',
+  t: 'tags', tags: 'tags', tag: 'tags', note: 'note', l: 'links', link: 'links', unlink: 'unlink', r: 'repeat', repeat: 'repeat', title: 'title',
   q: 'query', s: 'status', status: 'status', n: 'limit', limit: 'limit', from: 'from', to: 'to',
 };
 const FLAG_OPTIONS = { a: 'all', all: 'all', done: 'doneOnly', today: 'today' };
@@ -72,7 +73,10 @@ function parseArgs(argv) {
     } else if (VALUE_OPTIONS[name]) {
       const value = match[2] !== undefined ? match[2] : argv[++i];
       if (value === undefined) fail(`${token} に値がありません`);
-      options[VALUE_OPTIONS[name]] = value;
+      const key = VALUE_OPTIONS[name];
+      // 資料リンクは複数回指定できる
+      if (key === 'links') (options.links = options.links || []).push(value);
+      else options[key] = value;
     } else {
       fail(`不明なオプション: ${token}`);
     }
@@ -84,7 +88,7 @@ function parseArgs(argv) {
 
 function loadLogic(rawData) {
   const synced = [];
-  const context = vm.createContext({ console, structuredClone, __input: structuredClone(rawData), __synced: synced });
+  const context = vm.createContext({ console, structuredClone, URL, __input: structuredClone(rawData), __synced: synced });
   for (const file of LOGIC_FILES) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, file), 'utf8'), context, { filename: file });
   }
@@ -95,7 +99,7 @@ function loadLogic(rawData) {
   const logic = vm.runInContext(`({
     get data() { return data; }, uid, taskById, projectById, clientById, categoryById, runningEntries,
     runningEntryForTask, startTimer, stopTimer, stopAllTimers, setTaskStatus, compareActiveTasks,
-    parseTags, parseLevel, parseEstimate, planLabel, isOverdue, isDueToday, todayStr, toDateStr,
+    parseTags, parseLinks, parseLevel, parseEstimate, planLabel, isOverdue, isDueToday, todayStr, toDateStr,
     fromDateStr, addDays, entryDur, overlapMs, reportRangeMs, timeToTimestamp, googleEventTitle,
   })`, context);
   return { logic, synced };
@@ -204,6 +208,7 @@ function taskLine(L, task, now = Date.now()) {
   }
   if (task.todayDate === L.todayStr()) parts.push('☆');
   if (L.runningEntryForTask(task.id)) parts.push('▶');
+  if ((task.links || []).length) parts.push(`🔗${task.links.length}`);
   const subtasks = task.subtasks || [];
   if (subtasks.length) parts.push(`${subtasks.filter((subtask) => subtask.done).length}/${subtasks.length}`);
   return parts.join(' ');
@@ -233,11 +238,36 @@ function applyTaskOptions(L, task, options) {
   }
   if (options.tags !== undefined) task.tags = isClear(options.tags) ? [] : L.parseTags(options.tags);
   if (options.note !== undefined) task.note = isClear(options.note) ? null : options.note;
+  if (options.unlink !== undefined) {
+    const index = Number(options.unlink) - 1;
+    const links = task.links || [];
+    if (!Number.isInteger(index) || !links[index]) fail(`削除するリンクの番号が不正です: ${options.unlink}`);
+    task.links = links.filter((_, i) => i !== index);
+  }
+  if (options.links !== undefined) applyLinks(L, task, options.links);
   if (options.repeat !== undefined) {
     if (!isClear(options.repeat) && !['daily', 'weekly', 'monthly'].includes(options.repeat)) fail(`繰り返しは daily/weekly/monthly: ${options.repeat}`);
     task.repeat = isClear(options.repeat) ? null : options.repeat;
   }
   if (options.start !== undefined || options.end !== undefined) applyPlan(L, task, options);
+}
+
+// -l は既存のリンクに追加する(addでは空から)。- で全消去。http/https以外は弾く
+function applyLinks(L, task, values) {
+  let links = [...(task.links || [])];
+  for (const value of values) {
+    if (isClear(value)) {
+      links = [];
+      continue;
+    }
+    const parsed = L.parseLinks(value);
+    if (!parsed.length) fail(`http(s)のURLが見つかりません: ${value}`);
+    for (const link of parsed) {
+      links = links.filter((existing) => existing.url !== link.url);
+      links.push(link);
+    }
+  }
+  task.links = links;
 }
 
 // 画面の予定入力(planFromForm)と同じく、片方だけなら同じ日にそろえ、逆順なら入れ替える
@@ -279,7 +309,7 @@ const COMMANDS = {
     if (options.query) {
       const words = options.query.toLowerCase().split(/\s+/).filter(Boolean);
       tasks = tasks.filter((task) => {
-        const haystack = [task.title, task.note, ...(task.tags || [])].filter(Boolean).join(' ').toLowerCase();
+        const haystack = [task.title, task.note, ...(task.tags || []), ...(task.links || []).flatMap((link) => [link.title, link.url])].filter(Boolean).join(' ').toLowerCase();
         return words.every((word) => haystack.includes(word));
       });
     }
@@ -318,6 +348,7 @@ const COMMANDS = {
       ['running', L.runningEntryForTask(task.id) ? 'yes' : null], ['note', task.note],
     ];
     const lines = rows.filter(([, value]) => value !== null && value !== undefined).map(([key, value]) => `${key}: ${value}`);
+    (task.links || []).forEach((link, index) => lines.push(`link ${index + 1}: ${link.title ? `${link.title} ` : ''}${link.url}`));
     (task.subtasks || []).forEach((subtask, index) => lines.push(`  ${index + 1} [${subtask.done ? 'x' : ' '}] ${subtask.title}`));
     return { output: lines.join('\n') };
   },
@@ -327,7 +358,7 @@ const COMMANDS = {
     if (!title) fail('タイトルを指定してください: add <タイトル>');
     const task = {
       id: L.uid(), title, projectId: null, categoryId: null, status: 'todo', createdAt: Date.now(), completedAt: null,
-      repeat: null, estimateMinutes: null, importance: 0, weight: 0, note: null, tags: [], subtasks: [],
+      repeat: null, estimateMinutes: null, importance: 0, weight: 0, note: null, tags: [], links: [], subtasks: [],
       plannedStart: null, plannedEnd: null, plannedStartTime: null, plannedEndTime: null,
     };
     applyTaskOptions(L, task, options);

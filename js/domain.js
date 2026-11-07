@@ -29,6 +29,49 @@ function parseTags(value) {
   return tags;
 }
 
+// 資料リンクの入力(1行に1件。「タイトル URL」またはURLだけ)を[{ url, title }]へ正規化する。
+// http/https以外(javascript:など)はhref属性に入れると危険なので捨てる。同じURLは1件にまとめる
+function parseLinks(value) {
+  const seen = new Set();
+  const links = [];
+  for (const line of String(value || '').split(/\r?\n/)) {
+    const match = /https?:\/\/\S+/i.exec(line);
+    if (!match) continue;
+    const url = safeLinkUrl(match[0]);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    const title = (line.slice(0, match.index) + ' ' + line.slice(match.index + match[0].length))
+      .replace(/^[\s|:：-]+|[\s|:：-]+$/g, '').replace(/\s+/g, ' ');
+    links.push({ url, title: title || null });
+  }
+  return links;
+}
+
+// http/httpsのURLだけを正規化して返す。それ以外はnull(store.jsのsanitizeLinksと同じ規則)
+function safeLinkUrl(value) {
+  try {
+    const url = new URL(String(value).trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// 編集フォームに戻すときの文字列(parseLinksの逆)
+function linksToText(links) {
+  return (links || []).map((link) => (link.title ? `${link.title} ${link.url}` : link.url)).join('\n');
+}
+
+// リンクの表示名。タイトルが無ければホスト名
+function linkLabel(link) {
+  if (link.title) return link.title;
+  try {
+    return new URL(link.url).host;
+  } catch {
+    return link.url;
+  }
+}
+
 // 全タスクで使われているタグの一覧(五十音順)。タグはタスク側にのみ持ち、マスタは持たない
 function allTags() {
   const tags = new Set();
@@ -108,7 +151,7 @@ function applyTodoFilters(tasks) {
   const words = ui.todoSearch.normalize('NFKC').toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
   if (words.length) {
     result = result.filter((task) => {
-      const text = [task.title, task.note, ...(task.tags || [])].join(' ').normalize('NFKC').toLocaleLowerCase();
+      const text = [task.title, task.note, ...(task.tags || []), ...(task.links || []).map((link) => `${link.title || ''} ${link.url}`)].join(' ').normalize('NFKC').toLocaleLowerCase();
       return words.every((word) => text.includes(word));
     });
   }
@@ -180,5 +223,6 @@ function createNextOccurrence(task) {
     weight: parseLevel(task.weight),
     note: task.note || null,
     tags: [...(task.tags || [])],
+    links: (task.links || []).map((link) => ({ ...link })),
   };
 }
