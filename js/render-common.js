@@ -184,7 +184,9 @@ function tagChips(task) {
 
 // 資料リンク。新しいタブで開き、遷移先に元ページを渡さない
 function linkChips(task) {
-  return (task.links || []).map((link) => `<a class="chip link-chip" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" title="${esc(link.url)}">🔗 ${esc(linkLabel(link))}</a>`).join('');
+  // インポート直後など未検証のデータでもjavascript:等のURLを描画しない
+  const links = Array.isArray(task.links) ? task.links : [];
+  return links.filter((link) => link && safeLinkUrl(link.url)).map((link) => `<a class="chip link-chip" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" title="${esc(link.url)}">🔗 ${esc(linkLabel(link))}</a>`).join('');
 }
 
 // 累計時間の表示(見積があれば「累計/見積」+進捗バー、超過時は警告色)

@@ -224,7 +224,7 @@ function todoCreateCard() {
             <label class="field field-tags"><span class="field-label">タグ</span>
               <input type="text" name="tags" placeholder="デザイン, 急ぎ" autocomplete="off">
             </label>
-            <label class="field field-wide"><span class="field-label">資料リンク（1行に1件。「タイトル URL」またはURLのみ）</span>
+            <label class="field field-wide"><span class="field-label">資料リンク(1行に1件。「タイトル URL」またはURLのみ)</span>
               <textarea name="links" rows="2" placeholder="仕様書 https://example.com/spec"></textarea>
             </label>
           </div>

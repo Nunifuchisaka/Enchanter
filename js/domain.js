@@ -35,14 +35,17 @@ function parseLinks(value) {
   const seen = new Set();
   const links = [];
   for (const line of String(value || '').split(/\r?\n/)) {
-    const match = /https?:\/\/\S+/i.exec(line);
-    if (!match) continue;
-    const url = safeLinkUrl(match[0]);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    const title = (line.slice(0, match.index) + ' ' + line.slice(match.index + match[0].length))
+    // 1行に複数のURLがあれば別々のリンクにし、URL以外の文字列を最初のリンクのタイトルにする
+    const urls = line.match(/https?:\/\/\S+/gi);
+    if (!urls) continue;
+    const title = line.replace(/https?:\/\/\S+/gi, ' ')
       .replace(/^[\s|:：-]+|[\s|:：-]+$/g, '').replace(/\s+/g, ' ');
-    links.push({ url, title: title || null });
+    urls.forEach((raw, index) => {
+      const url = safeLinkUrl(raw);
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      links.push({ url, title: index === 0 && title ? title : null });
+    });
   }
   return links;
 }
