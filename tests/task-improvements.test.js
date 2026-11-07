@@ -300,6 +300,14 @@ test('task links: form input is parsed, unsafe URLs are dropped, chips open in a
   assert.ok(html.includes('🔗 docs.example.com'));
   run("ui.todoSearch = 'docs.example';");
   assert.equal(run('applyTodoFilters(data.tasks).length'), 1);
+  const multi = run(`parseLinks('メモ https://a.example.com https://b.example.com')`);
+  assert.deepEqual(JSON.parse(JSON.stringify(multi)), [
+    { url: 'https://a.example.com/', title: 'メモ' },
+    { url: 'https://b.example.com/', title: null },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(run(`parseLinks(linksToText(parseLinks('メモ https://a.example.com https://b.example.com')))`))), JSON.parse(JSON.stringify(multi)));
+  run(`data.tasks[0].links.push({url:'javascript:alert(1)', title:'x'});`);
+  assert.ok(!run('renderTodo()').includes('javascript:'));
   run("ui.todoSearch = ''; ui.editingTask = 't';");
   assert.ok(run('renderTodo()').includes('name="links"'));
 });
