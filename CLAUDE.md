@@ -28,7 +28,7 @@ Enchanterは、セルフホスト・単一ユーザー向けのタスク/時間�
 ### 認証なしのセキュリティモデル
 
 ログイン/セッション機構は存在せず、信頼境界は「ポートに到達できる者すべて」となっている。この境界を保つために2つの仕組みがあり、`server.js`/`app.js`を触る際は必ず維持すること:
-- 状態変更系エンドポイント(`PUT /api/data`, `POST /api/google/disconnect`, `POST /api/calendar/sync-entry`)はすべて`X-Requested-With: enchanter`ヘッダーを要求する(`requireCsrfHeader()`でチェック)。これによりメソッドを問わずすべてのリクエストでCORSプリフライトが発生する。サーバーは`OPTIONS`に応答せず`Access-Control-Allow-Origin`も送らないため、悪意あるページからブラウザ経由でこれらのエンドポイントを叩く(drive-by CSRF)ことができない。新しく状態変更系エンドポイントを追加する場合は必ず`requireCsrfHeader()`を呼び、`app.js`側の対応する`fetch()`呼び出しにも同ヘッダーを付けること
+- 状態変更系エンドポイント(`PUT /api/data`, `POST /api/google/disconnect`, `POST /api/calendar/sync-entry`, `POST /api/inbox/done`)はすべて`X-Requested-With: enchanter`ヘッダーを要求する(`requireCsrfHeader()`でチェック)。これによりメソッドを問わずすべてのリクエストでCORSプリフライトが発生する。サーバーは`OPTIONS`に応答せず`Access-Control-Allow-Origin`も送らないため、悪意あるページからブラウザ経由でこれらのエンドポイントを叩く(drive-by CSRF)ことができない。新しく状態変更系エンドポイントを追加する場合は必ず`requireCsrfHeader()`を呼び、`app.js`側の対応する`fetch()`呼び出しにも同ヘッダーを付けること
 - `PUT /api/data`(および読み込み時の`readData()`)はペイロードを`sanitizeData()`に通し、`project.color`を`/^#[0-9a-fA-F]{6}$/`に、`task.repeat`を`daily`/`weekly`/`monthly`/`null`のいずれかに、`task.status`を`todo`/`waiting_review`/`done`のいずれかに(旧`task.done`真偽値からのフォールバックあり。後述)、`task.estimateMinutes`を正の整数または`null`に強制する(`task.note`は文字列/`null`に補正されるがそれ以外はそのまま通す — 常に`esc()`経由で描画される)。`task.subtasks`は`{ id, title, done }`の形に整った要素だけにフィルタされる(タイトルが欠落/非文字列の要素は除外、idが無ければ`crypto.randomUUID()`で補完)。`task.tags`はトリム済み・空要素なし・重複なしの文字列配列に強制される(`sanitizeTags()`。描画は常に`esc()`経由)。`data.categories`(カテゴリマスタ)は`name`が欠落/空文字の要素を除外し(idが無ければ`crypto.randomUUID()`で補完)、`task.categoryId`は非空文字列または`null`に強制される(名前の描画は常に`esc()`経由)。`data.filters`(保存済みフィルター)も同様に、`name`が欠落/空文字の要素は除外し、`importance`/`month`を許可された値の集合に強制する。`color`/`estimateMinutes`のようなフィールドはクライアント側で`style="background:..."` / `value="..."`属性に無エスケープで埋め込まれるため、不正なAPIペイロードや手編集された`data/enchanter-data.json`が属性からの脱出を許してしまう可能性がある。HTML属性に描画される新しい列挙型フィールドを追加する場合は、同様の対処(サーバー側バリデーションまたはクライアント側`esc()`)が必要
 
 ### クライアントの状態構造
@@ -76,3 +76,7 @@ Enchanterは、セルフホスト・単一ユーザー向けのタスク/時間�
 ## Claude Codeの運用指示
 
 - このリポジトリでplan-modeの設計作業をPlan(またはその他の設計系)サブエージェントに委任する場合は、`model: "fable"`を指定して起動すること
+
+### 秘書の受信箱(imports/)
+
+`imports/`直下の`*.json`は`GET /api/inbox`で`sanitizeData()`を通して返され、`app.js`の`checkInbox()`が`planMerge()`/`applyMerge()`でid単位に追加取り込みし、保存成功後に`POST /api/inbox/done`で`imports/取り込み済み/`へ移す。`data/enchanter-data.json`をAIが読まずにタスクを渡すための仕組みなので、Claudeがタスクを追加するときはここにJSONを置く(idは`vrc-<名前>`のように固定にして重複を防ぐ)

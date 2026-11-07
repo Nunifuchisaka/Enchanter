@@ -75,6 +75,7 @@ const ui = {
   editingProject: null,
   editingCategory: null,
   googleStatus: { configured: false, connected: false },
+  inboxNotice: '',
 };
 
 // 進行中のドラッグ操作(ポインターイベントの途中経過)
@@ -681,6 +682,22 @@ function deleteTask(id) {
   renderAll();
 }
 
+// 複数行のテキスト(箇条書き・Markdownのチェックリストなど)を1行1件のサブタスクにする
+function parseChecklistLines(text) {
+  return String(text).split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*+・•]\s*)?(?:\[[ xX]\]\s*)?(?:\d+[.)．]\s*)?/, '').trim())
+    .filter(Boolean);
+}
+
+function addSubtasks(taskId, titles) {
+  const task = taskById(taskId);
+  if (!task || !titles.length) return;
+  if (!task.subtasks) task.subtasks = [];
+  for (const title of titles) task.subtasks.push({ id: uid(), title, done: false });
+  save();
+  renderAll();
+}
+
 function deleteSubtask(taskId, subtaskId) {
   const task = taskById(taskId);
   if (!task || !task.subtasks) return;
@@ -1007,7 +1024,11 @@ function repeatChip(task) {
 }
 
 function tagChips(task) {
-  return (task.tags || []).map((tag) => `<span class="chip tag-chip">🏷 ${esc(tag)}</span>`).join('');
+  // タグを押すとそのタグで絞り込む(絞り込み中のタグをもう一度押すと解除)
+  return (task.tags || []).map((tag) => {
+    const active = ui.todoFilterTag === tag;
+    return `<button type="button" class="chip tag-chip${active ? ' active' : ''}" data-action="filter-by-tag" data-tag="${esc(tag)}" aria-pressed="${active}" title="${active ? 'タグの絞り込みを解除' : 'このタグで絞り込む'}">🏷 ${esc(tag)}</button>`;
+  }).join('');
 }
 
 // 累計時間の表示(見積があれば「累計/見積」+進捗バー、超過時は警告色)
@@ -1152,6 +1173,9 @@ function renderAll() {
     if (nextFocus) nextFocus.focus({ preventScroll: true });
   }
 
+  if (ui.inboxNotice) {
+    view.insertAdjacentHTML('afterbegin', `<div class="undo-banner inbox-banner" role="status">${esc(ui.inboxNotice)} <button class="btn" data-action="dismiss-inbox-notice">閉じる</button></div>`);
+  }
   if (deletionHistory.length) {
     view.insertAdjacentHTML('afterbegin', '<div class="undo-banner" role="status">削除を取り消せます（ページを開いている間、最大20件） <button class="btn" data-action="undo-delete">直前の削除を取り消す</button></div>');
   }
@@ -1219,7 +1243,7 @@ function subtaskBlockHtml(task) {
             </li>`).join('')}
         </ul>
         <form class="subtask-add-form" data-action-submit="add-subtask" data-id="${esc(task.id)}">
-          <input type="text" name="title" placeholder="サブタスクを追加..." aria-label="サブタスク名" required>
+          <input type="text" name="title" placeholder="サブタスクを追加...(複数行の貼り付けで一括追加)" aria-label="サブタスク名" required>
           <button class="btn-icon" type="submit" title="サブタスクを追加" aria-label="サブタスクを追加">＋</button>
         </form>
       </div>
@@ -1297,7 +1321,7 @@ function todoTaskRow(task, now) {
   const statusClass = statusRowClass(task);
   const isToday = task.todayDate === todayStr();
   return `
-    <li class="task-item ${statusClass}${isDueToday(task) ? ' due-today' : ''}">
+    <li data-task-row="${esc(task.id)}" class="task-item ${statusClass}${isDueToday(task) ? ' due-today' : ''}">
       <button type="button" class="status-toggle${statusClass ? ' status-' + statusClass : ''}"
         data-action="cycle-status" data-id="${esc(task.id)}"
         aria-label="ステータス: ${TASK_STATUS_LABELS[task.status]}(クリックで次の状態へ)"
@@ -1415,6 +1439,35 @@ function todoCreateCard() {
     </div>`;
 }
 
+// チェックリストを持つ進行中タスクの達成度を、残りが多い順に一覧する(Todoの絞り込みに従う)
+function checklistProgressBoard(activeTasks) {
+  const rows = activeTasks
+    .filter((task) => (task.subtasks || []).length)
+    .map((task) => {
+      const total = task.subtasks.length;
+      const doneCount = task.subtasks.filter((subtask) => subtask.done).length;
+      return { task, total, doneCount, ratio: doneCount / total };
+    })
+    .sort((a, b) => a.ratio - b.ratio || parseLevel(b.task.importance) - parseLevel(a.task.importance) || (b.total - b.doneCount) - (a.total - a.doneCount));
+  if (!rows.length) return '';
+  const allTotal = rows.reduce((sum, row) => sum + row.total, 0);
+  const allDone = rows.reduce((sum, row) => sum + row.doneCount, 0);
+  const percent = (value) => Math.round(value * 100);
+  return `
+    <details class="progress-board" data-details-key="progress-board">
+      <summary>📊 チェックリストの進み具合 <span class="section-count">${allDone}/${allTotal}(${percent(allDone / allTotal)}%)</span></summary>
+      <ul class="progress-board-list">
+        ${rows.map(({ task, total, doneCount, ratio }) => `
+          <li class="progress-board-row${doneCount === total ? ' complete' : ''}">
+            <span class="chip-dot" style="background:${projectColor(task.projectId)}"></span>
+            <button type="button" class="progress-board-title" data-action="jump-to-task" data-id="${esc(task.id)}" title="タスクの位置へ移動">${esc(task.title)}</button>
+            <span class="progress" aria-hidden="true"><span class="progress-fill" style="width:${percent(ratio)}%"></span></span>
+            <span class="progress-board-count">${doneCount}/${total}</span>
+          </li>`).join('')}
+      </ul>
+    </details>`;
+}
+
 function renderTodo() {
   const now = Date.now();
   reconcileTodoProjectFilter();
@@ -1462,6 +1515,7 @@ function renderTodo() {
         <span class="task-overview">${active.length + inProgress.length + waitingReview.length}件の進行中タスク</span>
       </div>
       ${todoFilterRow()}
+      ${checklistProgressBoard(activeTasks)}
       <div class="todo-columns">
         <div class="todo-column">
           ${todoTaskGroup(todayGroup, now)}
@@ -2065,6 +2119,111 @@ function importBackup(file) {
   reader.readAsText(file);
 }
 
+// 取り込むJSONの中身を、既存データを残したまま追加する。同じidの項目は既存を優先して取り込まない
+// (同じファイルを何度取り込んでも重複しない)。参照先のプロジェクト等が無いタスクも取り込み、表示は「なし」になる
+const MERGE_KEYS = ['clients', 'categories', 'projects', 'tasks', 'entries', 'filters'];
+const MERGE_LABELS = { clients: 'クライアント', categories: 'カテゴリ', projects: 'プロジェクト', tasks: 'タスク', entries: '作業記録', filters: '保存済みフィルター' };
+
+function planMerge(incoming) {
+  const plan = {};
+  for (const key of MERGE_KEYS) {
+    const existingIds = new Set((data[key] || []).map((item) => item.id));
+    const items = (incoming[key] || []).filter((item) => item && typeof item === 'object' && !Array.isArray(item));
+    const added = [];
+    let skipped = 0;
+    for (const item of items) {
+      if (item.id && existingIds.has(item.id)) { skipped++; continue; }
+      const copy = { ...item, id: item.id || uid() };
+      existingIds.add(copy.id);
+      added.push(copy);
+    }
+    plan[key] = { added, skipped };
+  }
+  return plan;
+}
+
+function applyMerge(plan) {
+  for (const key of MERGE_KEYS) {
+    if (!data[key]) data[key] = [];
+    data[key].push(...plan[key].added);
+  }
+}
+
+function mergeImport(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result));
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid shape');
+      for (const key of MERGE_KEYS) {
+        if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error('invalid shape');
+      }
+      const plan = planMerge(parsed);
+      const lines = MERGE_KEYS
+        .filter((key) => plan[key].added.length || plan[key].skipped)
+        .map((key) => `${MERGE_LABELS[key]}: 追加 ${plan[key].added.length} 件` + (plan[key].skipped ? `(既にあるため ${plan[key].skipped} 件はスキップ)` : ''));
+      if (!lines.some((line) => !line.includes('追加 0 件'))) {
+        alert('追加できる新しい項目はありませんでした(すべて取り込み済みです)。');
+        return;
+      }
+      if (!confirm(`現在のデータはそのまま残し、次の内容を追加します。\n${lines.join('\n')}\nよろしいですか?`)) return;
+      applyMerge(plan);
+      save();
+      renderAll();
+    } catch (error) {
+      console.error('追加インポートに失敗しました', error);
+      alert('ファイルを読み込めませんでした。Enchanter形式のJSONファイルか確認してください。');
+    }
+  };
+  reader.readAsText(file);
+}
+
+// 秘書(Claude)が imports/ に置いたファイルを取り込む。開いたとき・タブに戻ったときに確認する
+let inboxChecking = false;
+async function checkInbox() {
+  if (inboxChecking) return;
+  inboxChecking = true;
+  try {
+    const response = await fetch('/api/inbox');
+    if (!response.ok) return; // 受信箱に対応していない古いサーバーでは何もしない
+    const { files = [] } = await response.json();
+    if (!files.length) return;
+    let addedTasks = 0;
+    let addedOther = 0;
+    const doneNames = [];
+    const broken = [];
+    for (const file of files) {
+      if (file.error || !file.content) { broken.push(file.name); continue; }
+      const plan = planMerge(file.content);
+      applyMerge(plan);
+      addedTasks += plan.tasks.added.length;
+      addedOther += MERGE_KEYS.filter((key) => key !== 'tasks').reduce((sum, key) => sum + plan[key].added.length, 0);
+      doneNames.push(file.name);
+    }
+    if (addedTasks || addedOther) save();
+    await saveChain; // 保存が終わってからファイルを移す(保存前に移すと取り込みが失われるため)
+    if (saveWarned) return; // 保存に失敗したらファイルは残し、次回また取り込む
+    for (const name of doneNames) {
+      await fetch('/api/inbox/done', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
+        body: JSON.stringify({ name }),
+      });
+    }
+    const parts = [];
+    if (addedTasks || addedOther) parts.push(`📬 秘書から タスク ${addedTasks} 件${addedOther ? `(ほか ${addedOther} 件)` : ''} を追加しました`);
+    if (broken.length) parts.push(`読めないファイルがありました: ${broken.join(', ')}`);
+    if (parts.length) {
+      ui.inboxNotice = parts.join('。');
+      renderAll();
+    }
+  } catch (error) {
+    console.error('受信箱の確認に失敗しました', error);
+  } finally {
+    inboxChecking = false;
+  }
+}
+
 /* ----- 集計タブ ----- */
 
 // 期間内の作業時間を client → project → task の階層に集計する
@@ -2499,11 +2658,12 @@ function manageBackupCard() {
   return `
     <div class="card">
       <h2>💾 バックアップ</h2>
-      <p class="backup-note">全データ(クライアント・プロジェクト・カテゴリ・タスク・作業記録)をJSONで書き出し/読み込みできます。インポートは現在のデータを全て置き換えます。</p>
+      <p class="backup-note">全データ(クライアント・プロジェクト・カテゴリ・タスク・作業記録)をJSONで書き出し/読み込みできます。「インポート(全置き換え)」は現在のデータを全て置き換えます。「追加インポート」は今のデータを残したまま、ファイル内のまだ無い項目(idで判定)だけを追加します。</p>
       <p class="backup-note">自動バックアップ：各日の最初の保存前データをサーバーのデータフォルダー内の backups/enchanter-日付.json に保持します。復元はそのファイルをインポートしてください。自動削除はしません。</p>
       <div class="backup-actions">
         <button class="btn" data-action="export-backup">⬇ エクスポート</button>
-        <label class="btn file-btn" role="button" tabindex="0">⬆ インポート<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
+        <label class="btn file-btn" role="button" tabindex="0">⬆ インポート(全置き換え)<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
+        <label class="btn file-btn" role="button" tabindex="0">➕ 追加インポート<input type="file" accept=".json,application/json" data-action-change="merge-import" hidden></label>
       </div>
     </div>`;
 }
@@ -2661,6 +2821,27 @@ document.addEventListener('click', (event) => {
   let celebration = null;
 
   switch (action) {
+    case 'filter-by-tag': {
+      const tag = element.dataset.tag || '';
+      ui.todoFilterTag = ui.todoFilterTag === tag ? '' : tag;
+      ui.activeFilterId = null;
+      if (ui.tab !== 'todo' && ui.tab !== 'kanban') ui.tab = 'todo';
+      break;
+    }
+    case 'jump-to-task': {
+      // 再描画せずに該当タスクへスクロールし、一瞬強調する
+      const row = [...document.querySelectorAll('[data-task-row]')].find((item) => item.dataset.taskRow === id);
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.remove('flash-highlight');
+        void row.offsetWidth;
+        row.classList.add('flash-highlight');
+      }
+      return;
+    }
+    case 'dismiss-inbox-notice':
+      ui.inboxNotice = '';
+      break;
     case 'undo-delete':
       undoDeletion();
       break;
@@ -2888,6 +3069,12 @@ document.addEventListener('change', (event) => {
       if (file) importBackup(file); // 確認・保存・再描画はimportBackup側で行う
       return;
     }
+    case 'merge-import': {
+      const file = element.files && element.files[0];
+      element.value = '';
+      if (file) mergeImport(file); // 確認・保存・再描画はmergeImport側で行う
+      return;
+    }
     case 'tl-date':
       if (element.value) ui.timelineDate = element.value;
       break;
@@ -2924,6 +3111,17 @@ document.addEventListener('change', (event) => {
 function trimmedField(formData, name) {
   return String(formData.get(name)).trim();
 }
+
+// サブタスク欄に複数行を貼り付けたら、1行ずつ別のサブタスクとして追加する
+document.addEventListener('paste', (event) => {
+  const input = event.target;
+  const form = input && input.closest && input.closest('form[data-action-submit="add-subtask"]');
+  if (!form || !event.clipboardData) return;
+  const lines = parseChecklistLines(event.clipboardData.getData('text'));
+  if (lines.length < 2) return;
+  event.preventDefault();
+  addSubtasks(form.dataset.id, lines);
+});
 
 document.addEventListener('submit', (event) => {
   const form = event.target.closest('[data-action-submit]');
@@ -3390,6 +3588,10 @@ async function init() {
     history.replaceState(null, '', location.pathname);
   }
   renderAll();
+  checkInbox();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkInbox();
+  });
 }
 
 init();

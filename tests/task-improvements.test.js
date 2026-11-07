@@ -359,3 +359,77 @@ test('stop-at form celebrates stop only when the end time is accepted', () => {
   listeners.submit({ target: { closest: () => form('2020-01-01T11:00') }, preventDefault() {} });
   assert.deepEqual(kinds(), ['stop']);
 });
+
+test('merge import adds only new ids and keeps existing data', () => {
+  const { run } = client();
+  run(`data.clients = [{id:'c1', name:'既存'}]; data.tasks = [{id:'t1', title:'既存タスク'}];
+    applyMerge(planMerge({clients:[{id:'c1', name:'上書きしない'}, {id:'c2', name:'新規'}], tasks:[{id:'t1', title:'X'}, {id:'t2', title:'新規タスク'}]}));`);
+  assert.equal(run("data.clients.find(c => c.id === 'c1').name"), '既存');
+  assert.equal(run('data.clients.length'), 2);
+  assert.equal(run('data.tasks.length'), 2);
+  run(`applyMerge(planMerge({tasks:[{id:'t2', title:'again'}]}));`);
+  assert.equal(run('data.tasks.length'), 2);
+});
+
+test('pasted checklist lines become separate subtasks', () => {
+  const { run } = client();
+  const lines = run(`parseChecklistLines('- [ ] 一つ目\\n- [x] 二つ目\\n\\n・三つ目\\n1. 四つ目')`);
+  assert.deepEqual([...lines], ['一つ目', '二つ目', '三つ目', '四つ目']);
+  run(`data.tasks = [{id:'t', title:'T'}]; addSubtasks('t', ['a', 'b']);`);
+  assert.equal(run("taskById('t').subtasks.length"), 2);
+});
+
+test('inbox endpoints list sanitized files and move them only with the CSRF header', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-inbox-'));
+  const inbox = path.join(dir, 'imports');
+  fs.mkdirSync(inbox);
+  fs.writeFileSync(path.join(inbox, 'a.json'), JSON.stringify({ tasks: [{ id: 'x', title: 'X', status: 'bogus' }] }));
+  fs.writeFileSync(path.join(inbox, 'broken.json'), '{');
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  const child = spawn(process.execPath, [path.join(root, 'server.js')], {
+    env: { ...process.env, PORT: String(port), DATA_DIR: path.join(dir, 'data'), INBOX_DIR: inbox, BROWSER: 'none', NO_OPEN: '1' },
+    stdio: 'ignore',
+  });
+  try {
+    let list;
+    for (let i = 0; i < 50 && !list; i++) {
+      try { list = await (await fetch(`http://127.0.0.1:${port}/api/inbox`)).json(); } catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    assert.equal(list.files.length, 2);
+    assert.equal(list.files[0].content.tasks[0].status, 'todo');
+    assert.equal(list.files[1].error, 'invalid');
+    const noHeader = await fetch(`http://127.0.0.1:${port}/api/inbox/done`, { method: 'POST', body: '{"name":"a.json"}' });
+    assert.equal(noHeader.status, 400);
+    const bad = await fetch(`http://127.0.0.1:${port}/api/inbox/done`, { method: 'POST', headers: { 'X-Requested-With': 'enchanter' }, body: '{"name":"../a.json"}' });
+    assert.equal(bad.status, 400);
+    const ok = await fetch(`http://127.0.0.1:${port}/api/inbox/done`, { method: 'POST', headers: { 'X-Requested-With': 'enchanter' }, body: '{"name":"a.json"}' });
+    assert.equal((await ok.json()).moved, true);
+    assert.ok(fs.existsSync(path.join(inbox, '取り込み済み', 'a.json')));
+  } finally {
+    child.kill();
+  }
+});
+
+test('clicking a tag chip toggles the tag filter', () => {
+  const { run, listeners } = client();
+  run(`data.tasks = [{id:'t', title:'T', status:'todo', tags:['2人']}];`);
+  const el = { dataset: { action: 'filter-by-tag', tag: '2人' } };
+  const event = { target: { closest: () => el } };
+  listeners.click(event);
+  assert.equal(run('ui.todoFilterTag'), '2人');
+  listeners.click(event);
+  assert.equal(run('ui.todoFilterTag'), '');
+  assert.ok(run('tagChips(data.tasks[0])').includes('data-action="filter-by-tag"'));
+});
+
+test('checklist progress board lists unfinished checklists first', () => {
+  const { run } = client();
+  const html = run(`checklistProgressBoard([
+    {id:'a', title:'Half', status:'todo', subtasks:[{id:'1', title:'x', done:true}, {id:'2', title:'y', done:false}]},
+    {id:'b', title:'None', status:'todo', subtasks:[{id:'3', title:'z', done:false}]},
+    {id:'c', title:'NoList', status:'todo'}
+  ])`);
+  assert.ok(html.indexOf('None') < html.indexOf('Half'));
+  assert.ok(!html.includes('NoList'));
+  assert.ok(html.includes('1/3'));
+});

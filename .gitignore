@@ -8,3 +8,6 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# 秘書(Claude)が作る取り込み用JSON
+imports/
