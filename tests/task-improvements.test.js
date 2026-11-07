@@ -13,10 +13,15 @@ const { spawn } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 
+function clientScripts() {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  return [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+}
+
 function client() {
   const listeners = {};
   const context = vm.createContext({
-    console, URLSearchParams, structuredClone,
+    console, URL, URLSearchParams, structuredClone,
     setInterval() {},
     window: { addEventListener() {}, matchMedia: () => ({ matches: false }) },
     document: { addEventListener: (event, fn) => { listeners[event] = fn; } },
@@ -24,8 +29,12 @@ function client() {
     alert: () => {},
     FormData: function(form) { return new Map(Object.entries(form.values)); },
   });
-  vm.runInContext(fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/init\(\);\s*$/, ''), context);
-  vm.runInContext('save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {}; celebrate = () => {};', context);
+  // ブラウザと同じく、index.htmlの読み込み順にファイルごと別スクリプトとして実行する(読み込み時の参照順の誤りも検出できる)
+  for (const file of clientScripts()) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    vm.runInContext(file === 'js/main.js' ? source.replace(/init\(\);\s*$/, '') : source, context, { filename: file });
+  }
+  vm.runInContext('globalThis.realSave = save; save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {}; celebrate = () => {};', context);
   return { context, listeners, run: (code) => vm.runInContext(code, context) };
 }
 
@@ -93,8 +102,9 @@ test('daily backups retain original data and sanitize today/search fields', () =
     assert.equal(backups.length, 1);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'backups', backups[0]))).tasks.length, 0);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'enchanter-data.json'))).tasks[0].id, 'b');
-    assert.equal(run('sanitizeData({tasks:[{todayDate:"bad"}]}).tasks[0].todayDate'), null);
-    assert.equal(run('sanitizeData({tasks:[{todayDate:"2026-09-27"}]}).tasks[0].todayDate'), '2026-09-27');
+    const { sanitizeData } = require(path.join(root, 'store.js'));
+    assert.equal(sanitizeData({tasks:[{todayDate:'bad'}]}).tasks[0].todayDate, null);
+    assert.equal(sanitizeData({tasks:[{todayDate:'2026-09-27'}]}).tasks[0].todayDate, '2026-09-27');
   } finally {
     assert.equal(path.dirname(path.resolve(dir)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(dir).startsWith('enchanter-test-'));
@@ -379,13 +389,24 @@ test('pasted checklist lines become separate subtasks', () => {
   assert.equal(run("taskById('t').subtasks.length"), 2);
 });
 
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
 test('inbox endpoints list sanitized files and move them only with the CSRF header', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-inbox-'));
   const inbox = path.join(dir, 'imports');
   fs.mkdirSync(inbox);
   fs.writeFileSync(path.join(inbox, 'a.json'), JSON.stringify({ tasks: [{ id: 'x', title: 'X', status: 'bogus' }] }));
   fs.writeFileSync(path.join(inbox, 'broken.json'), '{');
-  const port = 20000 + Math.floor(Math.random() * 20000);
+  const port = await freePort();
   const child = spawn(process.execPath, [path.join(root, 'server.js')], {
     env: { ...process.env, PORT: String(port), DATA_DIR: path.join(dir, 'data'), INBOX_DIR: inbox, BROWSER: 'none', NO_OPEN: '1' },
     stdio: 'ignore',
@@ -410,6 +431,92 @@ test('inbox endpoints list sanitized files and move them only with the CSRF head
   }
 });
 
+test('a failed inbox move answers 500 and leaves the server running', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-inbox-'));
+  const inbox = path.join(dir, 'imports');
+  fs.mkdirSync(inbox);
+  fs.writeFileSync(path.join(inbox, 'a.json'), '{}');
+  fs.writeFileSync(path.join(inbox, '取り込み済み'), 'フォルダーを作れなくする');
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(root, 'server.js')], {
+    env: { ...process.env, PORT: String(port), DATA_DIR: path.join(dir, 'data'), INBOX_DIR: inbox },
+    stdio: 'ignore',
+  });
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`http://127.0.0.1:${port}/api/inbox`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    const moved = await fetch(`http://127.0.0.1:${port}/api/inbox/done`, { method: 'POST', headers: { 'X-Requested-With': 'enchanter' }, body: '{"name":"a.json"}' });
+    assert.equal(moved.status, 500);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/inbox`)).status, 200);
+  } finally {
+    child.kill();
+  }
+});
+
+// checkInboxを本物のsave()で動かす。putは1回ごとのPUTの応答ステータス
+function inboxClient(putStatuses) {
+  const harness = client();
+  const log = { puts: 0, moved: [] };
+  const respond = (status, value, revision) => ({
+    status, ok: status < 300, json: async () => value,
+    headers: { get: (name) => (name === 'X-Data-Revision' ? revision : null) },
+  });
+  harness.context.fetch = async (url, options = {}) => {
+    if (url === '/api/inbox') {
+      return respond(200, { files: [{ name: 'a.json', content: { tasks: [{ id: 'inbox-task', title: 'X', status: 'todo' }] } }] });
+    }
+    if (url === '/api/inbox/done') {
+      log.moved.push(JSON.parse(options.body).name);
+      return respond(200, { moved: true });
+    }
+    if (options.method === 'PUT') return respond(putStatuses[log.puts++] ?? 204, null, 'next');
+    return respond(200, { tasks: [] }, 'next');
+  };
+  harness.run("save = realSave; dataRevision = 'old';");
+  harness.hasTask = () => harness.run("data.tasks.some((task) => task.id === 'inbox-task')");
+  return { ...harness, log };
+}
+
+test('checkInbox moves the file only after the import has been saved', async () => {
+  const { run, log, hasTask } = inboxClient([]);
+  await run('checkInbox()');
+  assert.equal(log.puts, 1);
+  assert.deepEqual(log.moved, ['a.json']);
+  assert.ok(hasTask());
+  assert.match(run('ui.inboxNotice'), /タスク 1 件/);
+});
+
+test('checkInbox keeps the file when a 409 throws the import away, then imports it next time', async () => {
+  const { run, log, hasTask } = inboxClient([409]);
+  await run('checkInbox()');
+  assert.equal(log.puts, 1);
+  assert.deepEqual(log.moved, []);
+  assert.equal(hasTask(), false);
+  await run('checkInbox()');
+  assert.deepEqual(log.moved, ['a.json']);
+  assert.ok(hasTask());
+});
+
+test('checkInbox keeps the file when saving fails and saves again before moving it', async () => {
+  const { run, log } = inboxClient([500]);
+  await run('checkInbox()');
+  assert.deepEqual(log.moved, []);
+  await run('checkInbox()');
+  assert.equal(log.puts, 2);
+  assert.deepEqual(log.moved, ['a.json']);
+  assert.equal(run("data.tasks.filter((task) => task.id === 'inbox-task').length"), 1);
+});
+
+test('checkInbox waits while the user is editing', async () => {
+  const { run, log, hasTask } = inboxClient([]);
+  run("ui.editingTask = 'other';");
+  await run('checkInbox()');
+  assert.equal(log.puts, 0);
+  assert.deepEqual(log.moved, []);
+  assert.equal(hasTask(), false);
+});
+
 test('clicking a tag chip toggles the tag filter', () => {
   const { run, listeners } = client();
   run(`data.tasks = [{id:'t', title:'T', status:'todo', tags:['2人']}];`);
@@ -432,4 +539,74 @@ test('checklist progress board lists unfinished checklists first', () => {
   assert.ok(html.indexOf('None') < html.indexOf('Half'));
   assert.ok(!html.includes('NoList'));
   assert.ok(html.includes('1/3'));
+});
+
+test('an edit made while an external-change check is running is not dropped silently', async () => {
+  const alerts = [];
+  const context = vm.createContext({
+    console, URL, URLSearchParams, structuredClone, setInterval() {},
+    window: { addEventListener() {} },
+    document: { addEventListener() {}, hidden: false, activeElement: null },
+    alert: (message) => alerts.push(message),
+  });
+  for (const file of clientScripts()) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    vm.runInContext(file === 'js/main.js' ? source.replace(/init\(\);\s*$/, '') : source, context, { filename: file });
+  }
+  const json = (status, value, revision) => ({
+    status, ok: status < 300, json: async () => value,
+    headers: { get: (name) => (name === 'X-Data-Revision' ? revision : null) },
+  });
+  context.fetch = async (url, options = {}) => {
+    if (url === '/api/data/revision') return json(200, { revision: 'cli' });
+    if (options.method === 'PUT') return json(options.headers['If-Match'] === 'cli' ? 204 : 409, null, 'cli');
+    return json(200, { tasks: [{ id: 'cli-task', title: 'CLI' }] }, 'cli');
+  };
+  vm.runInContext("renderAll = () => {}; dataRevision = 'browser'; checkExternalChange(); data.tasks.push({id:'local'}); save();", context);
+  await vm.runInContext('saveChain', context);
+  assert.equal(alerts.length, 1);
+  assert.equal(vm.runInContext("data.tasks.map((task) => task.id).join()", context), 'cli-task');
+});
+
+test('task links: form input is parsed, unsafe URLs are dropped, chips open in a new tab', () => {
+  const { run } = client();
+  const links = run(`parseLinks('仕様書 https://example.com/spec?a=1&b=2\\nhttps://docs.example.com/x\\njavascript:alert(1)\\nhttps://example.com/spec?a=1&b=2\\nメモだけ')`);
+  assert.deepEqual(JSON.parse(JSON.stringify(links)), [
+    { url: 'https://example.com/spec?a=1&b=2', title: '仕様書' },
+    { url: 'https://docs.example.com/x', title: null },
+  ]);
+  run(`data.tasks = [{id:'t', title:'T', status:'todo', links:${JSON.stringify(links)}}];`);
+  assert.equal(run('linksToText(data.tasks[0].links)'), '仕様書 https://example.com/spec?a=1&b=2\nhttps://docs.example.com/x');
+  const html = run('renderTodo()');
+  assert.ok(html.includes('href="https://example.com/spec?a=1&amp;b=2" target="_blank" rel="noopener noreferrer"'));
+  assert.ok(html.includes('🔗 docs.example.com'));
+  run("ui.todoSearch = 'docs.example';");
+  assert.equal(run('applyTodoFilters(data.tasks).length'), 1);
+  const multi = run(`parseLinks('メモ https://a.example.com https://b.example.com')`);
+  assert.deepEqual(JSON.parse(JSON.stringify(multi)), [
+    { url: 'https://a.example.com/', title: 'メモ' },
+    { url: 'https://b.example.com/', title: null },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(run(`parseLinks(linksToText(parseLinks('メモ https://a.example.com https://b.example.com')))`))), JSON.parse(JSON.stringify(multi)));
+  run(`data.tasks[0].links.push({url:'javascript:alert(1)', title:'x'});`);
+  assert.ok(!run('renderTodo()').includes('javascript:'));
+  run("ui.todoSearch = ''; ui.editingTask = 't';");
+  assert.ok(run('renderTodo()').includes('name="links"'));
+});
+
+test('sanitizeData keeps only http(s) links with normalized titles', () => {
+  const { sanitizeData } = require(path.join(root, 'store.js'));
+  const task = sanitizeData({ tasks: [{ id: 'a', links: [
+    { url: 'https://example.com', title: '  資料 ' },
+    { url: 'javascript:alert(1)', title: 'x' },
+    { url: 'not a url' },
+    { url: 'https://example.com/', title: 'dup' },
+    'https://bare.example.com',
+    { url: 'http://b.example.com/a"b', title: '' },
+  ] }] }).tasks[0];
+  assert.deepEqual(task.links, [
+    { url: 'https://example.com/', title: '資料' },
+    { url: 'http://b.example.com/a%22b', title: null },
+  ]);
+  assert.deepEqual(sanitizeData({ tasks: [{ id: 'b' }] }).tasks[0].links, []);
 });

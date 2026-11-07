@@ -1,0 +1,196 @@
+/* Enchanter: タイムラインタブ */
+
+/* ---------- timeline ---------- */
+
+.timeline-entry-form .entry-task {
+  flex-basis: 100%;
+}
+
+.timeline-entry-form label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.timeline-entry-form input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tl-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.tl-date-label {
+  font-weight: 700;
+  font-size: 18px;
+  margin-right: auto;
+}
+
+.tl-total {
+  color: var(--text-sub);
+}
+
+.tl-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.tl-summary .chip b {
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-wrap {
+  overflow-y: auto;
+  max-height: 640px;
+  padding-bottom: 4px;
+  border-radius: var(--radius);
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.timeline {
+  display: flex;
+  position: relative;
+  min-height: 960px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.tl-hours {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  width: 44px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.tl-hour {
+  flex: 1;
+  border-top: 1px solid var(--border);
+  padding: 2px 0 0 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tl-hour:first-child {
+  border-top: none;
+}
+
+.tl-lanes {
+  position: relative;
+  border-left: 1px solid var(--border);
+}
+
+.tl-lane {
+  position: relative;
+  width: 34px;
+}
+
+.tl-block {
+  position: absolute;
+  left: 4px;
+  width: 128px;
+  border-radius: 5px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 2px 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-height: 3px;
+  cursor: default;
+  box-shadow: var(--shadow);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+
+.tl-block.gantt-day-draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.tl-block.gantt-day-draggable.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  z-index: 3;
+}
+
+.tl-block.running {
+  outline: 2px dashed rgba(255, 255, 255, 0.7);
+  outline-offset: -3px;
+}
+
+.tl-block.plan-done {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.tl-block.plan-waiting {
+  outline: 2px solid var(--review);
+  outline-offset: -2px;
+}
+
+.tl-block.plan-in-progress {
+  outline: 2px solid var(--warning);
+}
+
+.tl-block.plan-overdue {
+  box-shadow: 0 0 0 2px var(--danger);
+}
+
+.tl-block-project {
+  opacity: 0.8;
+  font-size: 10px;
+}
+
+
+.entry-list {
+  list-style: none;
+  margin-top: 16px;
+}
+
+.entry-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.entry-item:hover,
+.entry-item:focus-within {
+  background: var(--surface-2);
+}
+
+.entry-item:last-child {
+  border-bottom: none;
+}
+
+
+.entry-dur {
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 70px;
+}
+
+.entry-task {
+  flex: 1;
+  min-width: 120px;
+  word-break: break-word;
+}

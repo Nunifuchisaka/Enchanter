@@ -1,77 +1,77 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+常に日本語で応答する。コミットメッセージも日本語で書く。
 
-常に日本語で応答する。
-
-## これは何か
-
-Enchanterは、セルフホスト・単一ユーザー向けのタスク/時間管理ツール(Todo管理 + 作業時間計測)です。ビルド不要・フレームワーク不使用・依存パッケージなしのバニラJS SPAで、依存パッケージなしの小さなNode HTTPサーバーがすべてを1つのJSONファイルに永続化します。
+Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + 作業時間計測ツール。ビルド不要・フレームワークなし・依存パッケージなしのバニラJS SPAで、Node標準の`http`だけで書いた`server.js`が全データを1つのJSONファイルに保存する。
 
 ## コマンド
 
-- サーバー起動: `node server.js`(Windowsは`start.cmd`をダブルクリックでも可。ブラウザも自動で開く)
-- Dockerで起動: `docker compose up -d`
-- ビルドステップ・バンドラー・テストスイート・リンターなし — `app.js`/`style.css`/`index.html`はそのまま配信される
-- 既定ポートは`8787`(`PORT`環境変数で上書き可)。データディレクトリは既定`./data`(`DATA_DIR`で上書き可)。待受アドレスは既定`127.0.0.1`(認証機能がないためループバックのみ。LANに公開する場合は`HOST`環境変数で上書き)
-- アプリは必ずサーバー経由(`http://localhost:8787`)でアクセスする必要がある。`index.html`を直接開く(`file://`)と保存にHTTP APIが必要なため動作せず、`app.js`側でもこのケースを検知してブロックしている
+- テスト: `npm test`(= `node --test`。`tests/*.test.js`を実行。数秒で終わる)
+- 起動: `node server.js` → `http://localhost:8787`(`PORT`/`DATA_DIR`(既定`./data`)/`HOST`(既定`127.0.0.1`。認証がないためループバックのみ)で上書き)
+- ビルド・バンドラー・リンターはない。`file://`で直接開くと動かない(`js/main.js`の`init()`が検知してブロック)
+
+## タスクの操作(登録・一覧・計測など)
+
+ユーザーに頼まれたタスク操作は`node cli.js <コマンド>`で行う。サーバーの起動は不要で、画面を開いていれば数秒で反映される。コマンド一覧と出力形式は`node cli.js help`(短い)。例: `node cli.js add 請求書を送る -p Webサイト --start tomorrow -i 2`、`node cli.js ls --today`、`node cli.js done <id>`。出力は1件1行で、先頭がid(前方一致で指定可)。
+
+## トークンを節約するための作業ルール
+
+- `data/`配下のファイルは直接読まない(`.claude/settings.json`でdenyしているのは`enchanter-data.json`だけだが、`backups/`やGoogle認証情報も読まない)。データの確認・変更は`cli.js`を使う。コードの動作確認には一時ディレクトリを`DATA_DIR`に指定してサンプルデータを使う
+- 変更したい画面・機能から下の「ファイルマップ」で対象ファイルを決め、そのファイルだけを読む。関数を探すときは`Grep`で定義行(`^function 名前`)を見つけてから`Read`の`offset`/`limit`で必要な範囲だけ読む
+- `README.md`はエンドユーザー向け。データ構造(スキーマ)を確認するとき以外は読まなくてよい
+
+## ファイルマップ
+
+フロントエンドは通常の`<script>`/`<link>`を`index.html`に並べて読み込む(モジュールではない)。トップレベルの宣言は全ファイルで共有されるので`import`は不要。**ファイルを追加・削除したら`index.html`の読み込みリストも更新する**(`tests/static-assets.test.js`が不一致を検出する)。読み込み時に実行されるコード(トップレベルの`const`の初期化など)は、それより前のファイルで定義されたものしか参照できない。
+
+| 変更したいもの | ファイル |
+| --- | --- |
+| 定数・表示名(状態・重要度・繰り返し) | `js/constants.js` |
+| 日付・時刻の計算/表示 | `js/time.js` |
+| `data`/`ui`の定義、保存(`save`)、読み込み、受信箱の取り込み(`checkInbox`)、Google連携のクライアント側、`taskById`などの検索 | `js/state.js` |
+| 絞り込み・並び順・繰り返し生成・タグ解析など純粋なロジック | `js/domain.js` |
+| データを変更する操作(タイマー・状態変更・削除/取り消し)、URLハッシュ | `js/mutations.js` |
+| 描画の共通部品(`esc`、選択肢、チップ、Todo/カンバン共通の絞り込みUI) | `js/render-common.js` |
+| 各タブの描画 | `js/tab-todo.js` / `tab-kanban.js` / `tab-timeline.js` / `tab-gantt.js` / `tab-report.js` / `tab-manage.js` |
+| CSV出力・バックアップのインポート・追加インポート | `js/export.js` |
+| `renderAll`(画面全体の再描画)・計測中表示・祝福演出(`celebrate`) | `js/render-app.js`(全タブより後に読み込む) |
+| クリック・入力・送信・ドラッグ・キーボードの処理 | `js/events.js` |
+| 経過時間の毎秒更新・`init()` | `js/main.js`(最後に読み込む) |
+| スタイル | `css/base.css`(トークン・共通部品) / `css/<タブ名>.css` / `css/responsive.css`(最後。全タブを上書き) |
+| データの検証(`sanitizeData`)・ファイルの読み書き・バックアップ・リビジョン | `store.js`(server.jsとcli.jsが共用) |
+| API・静的配信・受信箱(`imports/`)・Googleカレンダー連携 | `server.js` |
+| タスク操作CLI | `cli.js`(`js/`のconstants〜mutationsをvmで読み込んで画面と同じ副作用を再利用する) |
+| テスト | `tests/task-improvements.test.js`(画面・ロジック) / `tests/static-assets.test.js`(配信) / `tests/cli.test.js`(CLI・同時編集) |
+
+テストは`index.html`の順にフロントのファイルを`vm`へ読み込み、`save`/`renderAll`をスタブにして`renderTodo()`などの戻り値(HTML文字列)を検証する。
 
 ## アーキテクチャ
 
-アプリ全体は4つのファイルで構成され、それぞれ役割が1つに限定されている:
+### 状態と描画サイクル
 
-- `server.js` — フレームワークなしの`http`サーバー。3つの静的ファイル(`index.html`, `style.css`, `app.js`)を固定ルートで配信し、`GET /api/data` / `PUT /api/data`で全データセットを1つのJSONブロブとして扱うAPIを公開し、Googleカレンダーのoauth/同期エンドポイントもホストする(後述)。書き込みはアトミック(`.tmp`に書いてから`fs.renameSync`)なので、書き込み中のクラッシュでもデータが壊れない
-- `app.js` — クライアントアプリ本体一式。state・mutation・rendering・event handlingの順に並んでいる(`/* ---------- rendering ---------- */`のようなセクションマーカーを参照)。モジュール/バンドラーなし。すべてトップレベル関数と、モジュールスコープのオブジェクトが2つあるのみ
-- `style.css` — `prefers-color-scheme`によるライト/ダークテーマ切替、プリプロセッサなし
-- `index.html` — 骨格のみ。`<main id="view">`が唯一のレンダーターゲットで、タブボタンはヘッダーにある
+- `data` — 永続化されるモデル`{ clients, categories, projects, tasks, entries, filters }`。`data/enchanter-data.json`と同じ形(詳細は`README.md`の「データ構造」)。`end: null`の`entries`は計測中で、複数タスクを同時に計測できる
+- `ui` — タブ・日付範囲・絞り込み・編集中のidなど一時的な表示状態。永続化しない
+- 更新は必ず「`data`/`ui`を直接変更 → `save()` → `renderAll()`」。`save()`は`data`全体を`PUT /api/data`し、`saveChain`で直列化される。CLIなど他の場所での変更を上書きしないよう、読み込み時のリビジョン(ファイル内容のハッシュ)を`If-Match`で送り、食い違えばサーバーが409を返して画面は最新を読み直す。画面は5秒ごとと再表示時に`/api/data/revision`を確認し、編集中でなければ外部の変更を取り込む(`checkExternalChange`)。`renderAll()`はアクティブなタブの`render*()`が返すHTML文字列で`#view`を丸ごと置き換える(仮想DOMなし)。最後に`buildHash()`の結果を`history.replaceState`でURLに反映するので、変更ごとにハッシュを更新する必要はない。`applyHash()`が`init()`と`hashchange`でハッシュを検証して`ui`へ戻す
+- `task.status`は`todo`→`in_progress`→`waiting_review`→`done`の順に巡回する(`TASK_STATUS_ORDER`)。`done`になったとき(`setTaskStatus`)だけ、計測中タイマーの停止と繰り返しタスクの次回分生成が起きる。タイマー開始で`todo`は`in_progress`になる
+- カテゴリはマスタ(`data.categories`)を`task.categoryId`で参照する。タグはマスタなしの文字列配列(`allTags()`で導出)
 
-### 認証なしのセキュリティモデル
+### イベントと編集
 
-ログイン/セッション機構は存在せず、信頼境界は「ポートに到達できる者すべて」となっている。この境界を保つために2つの仕組みがあり、`server.js`/`app.js`を触る際は必ず維持すること:
-- 状態変更系エンドポイント(`PUT /api/data`, `POST /api/google/disconnect`, `POST /api/calendar/sync-entry`, `POST /api/inbox/done`)はすべて`X-Requested-With: enchanter`ヘッダーを要求する(`requireCsrfHeader()`でチェック)。これによりメソッドを問わずすべてのリクエストでCORSプリフライトが発生する。サーバーは`OPTIONS`に応答せず`Access-Control-Allow-Origin`も送らないため、悪意あるページからブラウザ経由でこれらのエンドポイントを叩く(drive-by CSRF)ことができない。新しく状態変更系エンドポイントを追加する場合は必ず`requireCsrfHeader()`を呼び、`app.js`側の対応する`fetch()`呼び出しにも同ヘッダーを付けること
-- `PUT /api/data`(および読み込み時の`readData()`)はペイロードを`sanitizeData()`に通し、`project.color`を`/^#[0-9a-fA-F]{6}$/`に、`task.repeat`を`daily`/`weekly`/`monthly`/`null`のいずれかに、`task.status`を`todo`/`waiting_review`/`done`のいずれかに(旧`task.done`真偽値からのフォールバックあり。後述)、`task.estimateMinutes`を正の整数または`null`に強制する(`task.note`は文字列/`null`に補正されるがそれ以外はそのまま通す — 常に`esc()`経由で描画される)。`task.subtasks`は`{ id, title, done }`の形に整った要素だけにフィルタされる(タイトルが欠落/非文字列の要素は除外、idが無ければ`crypto.randomUUID()`で補完)。`task.tags`はトリム済み・空要素なし・重複なしの文字列配列に強制される(`sanitizeTags()`。描画は常に`esc()`経由)。`data.categories`(カテゴリマスタ)は`name`が欠落/空文字の要素を除外し(idが無ければ`crypto.randomUUID()`で補完)、`task.categoryId`は非空文字列または`null`に強制される(名前の描画は常に`esc()`経由)。`data.filters`(保存済みフィルター)も同様に、`name`が欠落/空文字の要素は除外し、`importance`/`month`を許可された値の集合に強制する。`color`/`estimateMinutes`のようなフィールドはクライアント側で`style="background:..."` / `value="..."`属性に無エスケープで埋め込まれるため、不正なAPIペイロードや手編集された`data/enchanter-data.json`が属性からの脱出を許してしまう可能性がある。HTML属性に描画される新しい列挙型フィールドを追加する場合は、同様の対処(サーバー側バリデーションまたはクライアント側`esc()`)が必要
+- イベントは`js/events.js`の**イベント種別ごとに1つの委譲リスナー**で処理する。新しいコントロールは、テンプレートに`data-action="..."`(と`data-id`など)を付け、該当リスナーの`switch`に`case`を足す。要素ごとにリスナーを付けない
+- 編集はモーダルではなくインラインフォーム。`ui.editingTask`などにidを入れると該当`render*`が行をフォームに差し替える。`clearEditing()`で全編集状態を戻してから新しい編集に入るので、編集中は常に1つだけ
 
-### クライアントの状態構造
+### 認証なしのセキュリティモデル(必ず維持する)
 
-`app.js`内のモジュールレベルのグローバル変数2つがすべてを保持する:
-- `data` — 永続化されるドメインモデル: `{ clients[], projects[], tasks[], entries[] }`。`data/enchanter-data.json`と完全に一致する(スキーマは`README.md`参照)。`end: null`の`entries`は計測中のタイマーを表し、複数タスクを同時に計測できる。`task.status`は`'todo' | 'waiting_review' | 'done'`(ステータス切替ボタンをクリックするたびにこの順で巡回する。実装は`nextTaskStatus()`。ネイティブのcheckboxでは3状態を表現できないため)。`todo → done`への遷移時のみ、計測中タイマーの自動停止と繰り返しタスクの次回分生成が発火する — `waiting_review`を経由してもどちらも発火しない。各タスクは`subtasks[]`チェックリスト(`{ id, title, done }`)と、自由入力の`tags[]`(文字列配列。マスタは持たず、使用中タグの一覧は`allTags()`で全タスクから導出する)も持つ。カテゴリはタグと異なりマスタ(`data.categories`、管理タブで作成)を持ち、各タスクは`categoryId`でひとつだけ参照する
-- `ui` — 一時的な表示状態(アクティブなタブ、timeline/gantt/reportの日付範囲、現在編集中の項目など)。永続化されない
+信頼境界は「ポートに到達できる者すべて」。
 
-### レンダー/更新/保存サイクル
+- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`、`POST /api/inbox/done`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
+- データファイルへの書き込みは必ず`store.js`の`writeData()`(内部で`sanitizeData()`を通す)を使う。`color`・`estimateMinutes`などクライアントが`esc()`なしでHTML属性に埋め込む値はここで形式を強制している。HTML属性に描画する列挙型の項目を追加するときは、サーバー側で検証するか描画時に`esc()`する
+- 静的ファイルは`/`・`/index.html`と、`/js/`・`/css/`直下の英小文字・数字・ハイフン名のファイルだけを配信する(`staticRouteFor()`)
 
-差分検出や仮想DOMは存在しない。全体を通して使われるパターンは:
-1. mutation関数が`data`または`ui`を直接変更する(例: `startTimer`, `deleteTask`)
-2. `save()`を呼ぶ。`data`全体をシリアライズして`/api/data`に`PUT`する。保存は単一のPromiseチェーン(`saveChain`)を通るため、連続した編集がサーバー側で競合・順序逆転することがない
-3. `renderAll()`を呼ぶ。アクティブなタブのマークアップをテンプレートリテラルのHTML文字列として`#view`にまるごと再描画する(タブごとに1つの`render*`関数: `renderTodo`, `renderTimeline`, `renderGantt`, `renderReport`, `renderManage`)
+### その他
 
-### イベントハンドリング
-
-インタラクティブな要素はすべて、`app.js`末尾(`/* ---------- events ---------- */`)にある**DOMイベント種別ごとに1つの委譲リスナー**で処理される。要素ごとの個別ハンドラは使わない:
-- `click` → `[data-action]` / `el.dataset.action`に基づき大きな`switch`で分岐
-- `change`と`submit` → 別々の委譲リスナーで、同じく`data-action`/`data-*`属性の規約に従う
-
-新しいインタラクティブなコントロールを追加する場合は、この規約に従うこと: テンプレート文字列に`data-action="..."`(および必要に応じて`data-id`などの`data-*`)属性を追加し、新しいリスナーをアタッチするのではなく、該当する委譲リスナーに`case`を追加する
-
-### タブ
-
-各タブ(`todo`, `timeline`, `gantt`, `report`, `manage`)は独立した`render*`関数で、`#view`向けの完全なHTML文字列を生成する。タブ切替は`ui.tab`を変更して`renderAll()`を呼ぶだけ。タブの状態(および現在のタブの日付・期間)は`buildHash()`によってURLハッシュ(`#timeline?date=...`)に反映され、`renderAll()`の最後で`history.replaceState`により一度だけ適用される — すべての状態変更が`renderAll()`を経由するため、mutationごとにハッシュを更新する必要はない。`applyHash()`(`init()`時と`hashchange`時に呼ばれる)がハッシュをパース・検証して`ui`に反映するため、リロード/ブックマーク/戻る・進むでも表示状態が復元される
-
-### 編集パターン
-
-インライン編集フォーム(モーダルではない)は、`ui.editingTask`/`ui.editingEntry`/`ui.editingClient`/`ui.editingProject`をid(または`null`)に設定することでトグルされる。該当する`render*`関数がこの値を見て、行をフォームに差し替える。`clearEditing()`は新しい編集状態に入る前にこの4つすべてをリセットするため、アプリ全体で常に1つのものしか編集状態にならない
-
-### 旧バージョンからの移行
-
-`app.js`には、ブラウザの`localStorage`(`enchanter-data-v1`)にデータを保存していた旧バージョン向けの一回限りの移行ロジック(`migrateFromLocalStorage`)が残っている。`init()`時に一度だけ実行され、サーバー側のファイルが空の場合のみ動作し、実行後は`localStorage`のフラグで自身をゲートする — このパスにまだ依存しているユーザーがいないか確認せずに削除しないこと
-
-### Googleカレンダー連携(任意機能)
-
-すべて`server.js`内に閉じている(npmパッケージは追加せず、`fetch`でGoogleのREST APIを直接呼び出す)。`app.js`側は`/api/google/*`と`/api/calendar/sync-entry`エンドポイントを呼ぶだけで、Googleの認証情報に直接触れることはない。エンドユーザー向けのセットアップ手順は`README.md`の「Googleカレンダー連携」セクションを参照
-
-- 設定は`data/`配下(gitignore対象、コミットされない)に置かれる: `google-credentials.json`(ユーザーがGoogle Cloud ConsoleからOAuthクライアントID/シークレットを取得して保存)、`google-token.json`(アクセス/リフレッシュトークン、サーバーが書き込む)。`google-sync-map.json`はローカルの`entryId` → GoogleイベントIDの対応を保持し、同じ作業記録を再同期した際に重複作成せず既存イベントを更新する
-- OAuthは「デスクトップアプリ」フロー: `GET /api/google/auth-url`が同意画面URLを組み立て(ランダムな`state`をメモリ上の`pendingOAuthState`に保存)、ブラウザがGoogleにリダイレクトされ、`GET /oauth/callback`が`state`の一致を確認したうえで認可コードをトークンに交換する。`getValidAccessToken()`はアクセストークンの期限が近づくとリフレッシュトークンを使って透過的に更新する
-- `app.js`の`syncEntryToGoogle()`は、作業記録の`end`が非nullになるたび(タイマー停止、または手動での作業記録追加/編集)に`POST /api/calendar/sync-entry`を呼ぶ(呼び出し元は「レンダー/更新/保存サイクル」を参照)。これはfire-and-forgetで、失敗してもログに記録されるだけでローカルの保存/描画サイクルをブロックしない
-- `data/google-credentials.json`が存在しない場合、`ui.googleStatus.configured`は`false`になり、この機能はどこにおいても不活性になる — Googleが設定済みであることを前提とするコードパスは存在しない
+- `js/state.js`の`migrateFromLocalStorage`は旧localStorage版からの一回限りの移行。サーバー側が空のときだけ動く。利用者がいないか確認せずに削除しない
+- Googleカレンダー連携は任意機能で、Googleとの通信はすべて`server.js`(`fetch`でREST APIを直接呼ぶ)。認証情報は`data/google-credentials.json`/`google-token.json`、作業記録とイベントの対応は`google-sync-map.json`。クライアントは作業記録の`end`が確定するたびに`syncEntryToGoogle()`でfire-and-forget同期する。認証情報が無ければ`ui.googleStatus.configured`が`false`になり、どこでも不活性
 
 ## Claude Codeの運用指示
 
@@ -79,4 +79,4 @@ Enchanterは、セルフホスト・単一ユーザー向けのタスク/時間�
 
 ### 秘書の受信箱(imports/)
 
-`imports/`直下の`*.json`は`GET /api/inbox`で`sanitizeData()`を通して返され、`app.js`の`checkInbox()`が`planMerge()`/`applyMerge()`でid単位に追加取り込みし、保存成功後に`POST /api/inbox/done`で`imports/取り込み済み/`へ移す。`data/enchanter-data.json`をAIが読まずにタスクを渡すための仕組みなので、Claudeがタスクを追加するときはここにJSONを置く(idは`vrc-<名前>`のように固定にして重複を防ぐ)
+`imports/`直下の`*.json`は`GET /api/inbox`で`sanitizeData()`を通して返され、`js/state.js`の`checkInbox()`が`js/export.js`の`planMerge()`/`applyMerge()`でid単位に追加取り込みし、保存成功後に`POST /api/inbox/done`で`imports/取り込み済み/`へ移す。`data/enchanter-data.json`をAIが読まずにタスクを渡すための仕組みなので、Claudeがタスクを追加するときはここにJSONを置く(idは`vrc-<名前>`のように固定にして重複を防ぐ)

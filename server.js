@@ -2,7 +2,7 @@
 
 /* ============================================================
  * Enchanter - ローカルサーバー
- * 静的ファイルの配信と、データのJSONファイル保存を行う。
+ * 静的ファイル(index.html・js/・css/)の配信と、データのJSONファイル保存を行う。
  * 依存パッケージなし。`node server.js` で起動。
  * ============================================================ */
 
@@ -10,202 +10,43 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+// テストはvm上でこのファイルを実行するため、相対パスではなく__dirname基準で読み込む
+const { createStore, sanitizeData, readJsonSafe, writeJsonAtomic } = require(path.join(__dirname, 'store.js'));
 
 // ---- 設定 ----
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '127.0.0.1';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'enchanter-data.json');
 const MAX_BODY = 20 * 1024 * 1024;
 // 秘書(Claude)が置くタスクの受信箱。直下の*.jsonをアプリが開いたときに追加取り込みし、済んだものは下のフォルダーへ移す
 const INBOX_DIR = process.env.INBOX_DIR || path.join(__dirname, 'imports');
 const INBOX_DONE_DIR = path.join(INBOX_DIR, '取り込み済み');
 const INBOX_NAME_RE = /^[^\\/:*?"<>|]+\.json$/;
 const MAX_INBOX_FILE = 2 * 1024 * 1024;
+const store = createStore(DATA_DIR);
+const { writeData } = store;
 
-const EMPTY_DATA = { clients: [], projects: [], tasks: [], entries: [] };
-const DEFAULT_COLOR = '#7c5cff';
-const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const MONTH_RE = /^\d{4}-\d{2}$/;
-const REPEAT_VALUES = new Set(['daily', 'weekly', 'monthly']);
-const TASK_STATUSES = new Set(['todo', 'in_progress', 'waiting_review', 'done']);
-const FILTER_LEVELS = ['', '0', '1', '2', '3'];
 
 const STATIC_ROUTES = {
   '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
   '/index.html': { file: 'index.html', type: 'text/html; charset=utf-8' },
-  '/style.css': { file: 'style.css', type: 'text/css; charset=utf-8' },
-  '/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8' },
 };
+// js/・css/直下のファイルだけを配信する。名前を英小文字・数字・ハイフンに限定してパストラバーサルを防ぐ
+const ASSET_RE = /^\/(js|css)\/[a-z0-9-]+\.\1$/;
+const ASSET_TYPES = { js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' };
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-
-// ---- データの検証(読み込み時・保存時の両方で必ず通す) ----
-
-// importance(重要度)/weight(重さ)共通の0-3段階バリデーション(0=指定なし)
-function sanitizeLevel(value) {
-  return Number.isInteger(value) && value >= 0 && value <= 3 ? value : 0;
+function staticRouteFor(pathname) {
+  if (STATIC_ROUTES[pathname]) return STATIC_ROUTES[pathname];
+  const match = ASSET_RE.exec(pathname);
+  return match ? { file: pathname.slice(1), type: ASSET_TYPES[match[1]] } : null;
 }
 
-function isNonBlankString(value) {
-  return typeof value === 'string' && value.trim() !== '';
-}
-
-function ensureId(id) {
-  return typeof id === 'string' && id ? id : crypto.randomUUID();
-}
-
-// タグはトリム済み・空要素なし・重複なしの文字列配列に強制する(表示は常にesc()経由)
-function sanitizeTags(tags) {
-  if (!Array.isArray(tags)) return [];
-  const seen = new Set();
-  const sanitized = [];
-  for (const tag of tags) {
-    if (typeof tag !== 'string') continue;
-    const trimmed = tag.trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    sanitized.push(trimmed);
-  }
-  return sanitized;
-}
-
-// status未設定の旧データ(done: booleanのみ)を新形式へ変換する後方互換マイグレーション
-function sanitizeStatus(task) {
-  if (TASK_STATUSES.has(task.status)) return task.status;
-  return task.done === true ? 'done' : 'todo';
-}
-
-function sanitizeSubtasks(subtasks) {
-  if (!Array.isArray(subtasks)) return [];
-  return subtasks
-    .filter((subtask) => subtask && isNonBlankString(subtask.title))
-    .map((subtask) => ({ id: ensureId(subtask.id), title: subtask.title, done: subtask.done === true }));
-}
-
-// color/repeat/estimateMinutes等はHTML属性に埋め込まれる値があるため、通常UIの入力制限に頼らず
-// 保存前にサーバー側でも形式を強制する(不正なAPIペイロードや手編集されたデータファイル対策)
-function sanitizeTask(task) {
-  const rest = { ...task };
-  delete rest.done; // 旧フィールド(done)は保存先から除去する
-  const status = sanitizeStatus(task);
-  return {
-    ...rest,
-    status,
-    todayDate: typeof task.todayDate === 'string' && DATE_RE.test(task.todayDate) ? task.todayDate : null,
-    completedAt: status === 'done'
-      ? (Number.isFinite(task.completedAt) ? task.completedAt : Date.now())
-      : null,
-    repeat: REPEAT_VALUES.has(task.repeat) ? task.repeat : null,
-    // value属性に埋め込まれるため正の整数のみ許可
-    estimateMinutes: Number.isFinite(task.estimateMinutes) && task.estimateMinutes > 0
-      ? Math.round(task.estimateMinutes)
-      : null,
-    importance: sanitizeLevel(task.importance),
-    weight: sanitizeLevel(task.weight),
-    kanbanOrder: Number.isSafeInteger(task.kanbanOrder) && task.kanbanOrder >= 0 ? task.kanbanOrder : null,
-    categoryId: typeof task.categoryId === 'string' && task.categoryId ? task.categoryId : null,
-    note: typeof task.note === 'string' && task.note !== '' ? task.note : null,
-    tags: sanitizeTags(task.tags),
-    subtasks: sanitizeSubtasks(task.subtasks),
-  };
-}
-
-function sanitizeProject(project) {
-  return { ...project, color: COLOR_RE.test(project.color) ? project.color : DEFAULT_COLOR };
-}
-
-// カテゴリマスタ。nameが欠落/空の要素は除外する(名前の表示は常にesc()経由)
-function sanitizeCategories(categories) {
-  if (!Array.isArray(categories)) return [];
-  return categories
-    .filter((category) => category && isNonBlankString(category.name))
-    .map((category) => ({ id: ensureId(category.id), name: category.name }));
-}
-
-// 保存済みフィルター。値はselect要素の照合にのみ使う列挙値に強制する
-function sanitizeFilters(filters) {
-  if (!Array.isArray(filters)) return [];
-  return filters
-    .filter((filter) => filter && isNonBlankString(filter.name))
-    .map((filter) => ({
-      id: ensureId(filter.id),
-      name: filter.name,
-      clientId: typeof filter.clientId === 'string' ? filter.clientId : null,
-      projectId: typeof filter.projectId === 'string' ? filter.projectId : null,
-      categoryId: typeof filter.categoryId === 'string' ? filter.categoryId : null,
-      importance: FILTER_LEVELS.includes(filter.importance) ? filter.importance : '',
-      weight: FILTER_LEVELS.includes(filter.weight) ? filter.weight : '',
-      month: typeof filter.month === 'string' && MONTH_RE.test(filter.month) ? filter.month : '',
-      tag: typeof filter.tag === 'string' ? filter.tag.trim() : '',
-      search: typeof filter.search === 'string' ? filter.search : '',
-    }));
-}
-
-function sanitizeData(raw) {
-  return {
-    clients: raw.clients || [],
-    categories: sanitizeCategories(raw.categories),
-    projects: (raw.projects || []).map(sanitizeProject),
-    tasks: (raw.tasks || []).map(sanitizeTask),
-    entries: raw.entries || [],
-    filters: sanitizeFilters(raw.filters),
-  };
-}
-
-// ---- データファイルの読み書き ----
-
-function readJsonSafe(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return fallback;
-  }
-}
-
-// 一時ファイルに書いてからリネームすることで、書き込み中のクラッシュでも既存データが壊れないようにする
-function writeTextAtomic(file, text) {
-  fs.writeFileSync(file + '.tmp', text);
-  fs.renameSync(file + '.tmp', file);
-}
-
-function writeJsonAtomic(file, value) {
-  writeTextAtomic(file, JSON.stringify(value, null, 2) + '\n');
-}
-
-function readData() {
-  try {
-    return sanitizeData(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')));
-  } catch {
-    return EMPTY_DATA;
-  }
-}
-
-// 各日の最初の変更前データを backups/enchanter-YYYY-MM-DD.json に残す(認証情報はバックアップしない)
-function backupDataFileOncePerDay() {
-  const backupDir = path.join(DATA_DIR, 'backups');
-  fs.mkdirSync(backupDir, { recursive: true });
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const backupFile = path.join(backupDir, `enchanter-${day}.json`);
-  if (fs.existsSync(backupFile)) return;
-  const previous = fs.readFileSync(DATA_FILE, 'utf8');
-  JSON.parse(previous); // 壊れたデータをバックアップとして残さないため、読めることを確認する
-  writeTextAtomic(backupFile, previous);
-}
-
-function writeData(data) {
-  if (fs.existsSync(DATA_FILE)) backupDataFileOncePerDay();
-  writeJsonAtomic(DATA_FILE, data);
-}
 
 // ---- HTTP ヘルパー ----
 
-function sendJson(res, status, value) {
+function sendJson(res, status, value, headers = {}) {
   const body = JSON.stringify(value);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(body);
 }
 
@@ -283,15 +124,43 @@ function parseJsonObject(text) {
 
 // ---- データAPI ----
 
+// ブラウザは読み込み時のリビジョンをIf-Matchで送る。CLIなど別の場所でファイルが
+// 更新されていたら409を返し、ブラウザ側で最新を読み直させる(古い全体データでの上書きを防ぐ)
+const REVISION_HEADER = 'X-Data-Revision';
+
+function handleGetData(res) {
+  const { data, revision } = store.readDataWithRevision();
+  sendJson(res, 200, data, { [REVISION_HEADER]: revision });
+}
+
 function handlePutData(req, res) {
   if (!requireCsrfHeader(req, res)) return;
   readBody(req, res, (body) => {
+    let payload;
     try {
-      writeData(sanitizeData(parseJsonObject(body)));
-      sendNoContent(res);
+      payload = parseJsonObject(body);
     } catch {
       sendJson(res, 400, { error: '不正なJSONです' });
+      return;
     }
+    const expected = req.headers['if-match'];
+    const current = store.currentRevision();
+    if (expected && expected !== current) {
+      sendJson(res, 409, { error: '他の場所でデータが更新されています' }, { [REVISION_HEADER]: current });
+      return;
+    }
+    // readBodyのコールバックは非同期なので、ここで投げた例外はcreateServer側では捕まらずプロセスが落ちる。
+    // 形の崩れたペイロード(tasksが配列でない等)はsanitizeDataで例外になるため、必ずここで捕まえる
+    let revision;
+    try {
+      revision = writeData(payload);
+    } catch (error) {
+      console.error('データの保存に失敗しました', error);
+      sendJson(res, 400, { error: '不正なデータです' });
+      return;
+    }
+    res.writeHead(204, { [REVISION_HEADER]: revision });
+    res.end();
   });
 }
 
@@ -543,7 +412,12 @@ function handleInboxDoneRequest(req, res) {
       sendJson(res, 400, { error: '不正なファイル名です' });
       return;
     }
-    sendJson(res, 200, { moved: markInboxDone(payload.name) });
+    // readBodyのコールバックは非同期なので、ファイル移動の例外をここで捕まえないとプロセスが落ちる
+    try {
+      sendJson(res, 200, { moved: markInboxDone(payload.name) });
+    } catch (error) {
+      sendInternalError(res, error);
+    }
   });
 }
 
@@ -552,8 +426,9 @@ function handleInboxDoneRequest(req, res) {
 function serveStatic(res, { file, type }) {
   fs.readFile(path.join(__dirname, file), (error, buffer) => {
     if (error) {
-      res.writeHead(500);
-      res.end('Internal Server Error');
+      const missing = error.code === 'ENOENT';
+      res.writeHead(missing ? 404 : 500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(missing ? 'Not Found' : 'Internal Server Error');
       return;
     }
     res.writeHead(200, { 'Content-Type': type });
@@ -569,12 +444,18 @@ function routeRequest(req, res) {
   // ---- API ----
   if (url.pathname === '/api/data') {
     if (req.method === 'GET') {
-      sendJson(res, 200, readData());
+      handleGetData(res);
     } else if (req.method === 'PUT') {
       handlePutData(req, res);
     } else {
       sendMethodNotAllowed(res, 'GET, PUT');
     }
+    return;
+  }
+
+  // 画面を開いたまま他の場所(CLI)で変更されたかを確かめるための軽い問い合わせ
+  if (url.pathname === '/api/data/revision') {
+    if (allowMethod(req, res, 'GET')) sendJson(res, 200, { revision: store.currentRevision() });
     return;
   }
 
@@ -615,7 +496,7 @@ function routeRequest(req, res) {
   }
 
   // ---- 静的ファイル ----
-  const route = STATIC_ROUTES[url.pathname];
+  const route = staticRouteFor(url.pathname);
   if (req.method === 'GET' && route) {
     serveStatic(res, route);
     return;
@@ -635,5 +516,5 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Enchanter が起動しました: http://localhost:${PORT} (bind: ${HOST})`);
-  console.log(`データ保存先: ${DATA_FILE}`);
+  console.log(`データ保存先: ${store.dataFile}`);
 });
