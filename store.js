@@ -50,6 +50,28 @@ function sanitizeTags(tags) {
   return sanitized;
 }
 
+// 資料リンクは[{ url, title }]。urlはhref属性に入るのでhttp/httpsのみ許可する(javascript:等を防ぐ)
+function sanitizeLinks(links) {
+  if (!Array.isArray(links)) return [];
+  const seen = new Set();
+  const sanitized = [];
+  for (const link of links) {
+    if (!link || typeof link.url !== 'string') continue;
+    let url;
+    try {
+      url = new URL(link.url.trim());
+    } catch {
+      continue;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
+    if (seen.has(url.href)) continue;
+    seen.add(url.href);
+    const title = typeof link.title === 'string' && link.title.trim() ? link.title.trim() : null;
+    sanitized.push({ url: url.href, title });
+  }
+  return sanitized;
+}
+
 // status未設定の旧データ(done: booleanのみ)を新形式へ変換する後方互換マイグレーション
 function sanitizeStatus(task) {
   if (TASK_STATUSES.has(task.status)) return task.status;
@@ -87,6 +109,7 @@ function sanitizeTask(task) {
     categoryId: typeof task.categoryId === 'string' && task.categoryId ? task.categoryId : null,
     note: typeof task.note === 'string' && task.note !== '' ? task.note : null,
     tags: sanitizeTags(task.tags),
+    links: sanitizeLinks(task.links),
     subtasks: sanitizeSubtasks(task.subtasks),
   };
 }

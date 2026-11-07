@@ -313,6 +313,7 @@ document.addEventListener('submit', (event) => {
         weight: parseLevel(formData.get('weight')),
         note: null,
         tags: parseTags(formData.get('tags')),
+        links: parseLinks(formData.get('links')),
         subtasks: [],
         ...planFromForm(formData),
       });
@@ -331,6 +332,7 @@ document.addEventListener('submit', (event) => {
       task.weight = parseLevel(formData.get('weight'));
       task.note = String(formData.get('note') || '').trim() || null;
       task.tags = parseTags(formData.get('tags'));
+      task.links = parseLinks(formData.get('links'));
       Object.assign(task, planFromForm(formData));
       clearEditing();
       break;

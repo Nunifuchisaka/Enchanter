@@ -537,9 +537,14 @@ input[type="radio"] {
 }
 
 .field > input,
-.field > select {
+.field > select,
+.field > textarea {
   width: 100%;
   min-width: 0;
+}
+
+.field > textarea {
+  resize: vertical;
 }
 
 fieldset.field {
@@ -631,6 +636,19 @@ fieldset.field {
 .chip.tag-chip {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.chip.link-chip {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--border);
+}
+
+.chip.link-chip:hover {
+  text-decoration: underline;
 }
 
 .chip.category-chip {
