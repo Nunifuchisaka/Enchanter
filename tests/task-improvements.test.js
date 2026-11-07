@@ -34,7 +34,7 @@ function client() {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
     vm.runInContext(file === 'js/main.js' ? source.replace(/init\(\);\s*$/, '') : source, context, { filename: file });
   }
-  vm.runInContext('save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {};', context);
+  vm.runInContext('globalThis.realSave = save; save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {}; celebrate = () => {};', context);
   return { context, listeners, run: (code) => vm.runInContext(code, context) };
 }
 
@@ -257,6 +257,288 @@ test('gantt rows offer the same start and stop timer buttons as the todo tab', (
   assert.ok(html.includes('<button class="timer-btn stop" data-action="stop-timer" data-id="e1">'));
   assert.ok(!html.includes('data-action="start-timer" data-id="fin"'));
   assert.ok(!html.includes('data-action="start-timer" data-id="busy"'));
+});
+
+function celebrationClient() {
+  const harness = client();
+  harness.run(`globalThis.celebrated = [];
+    celebrate = (kind, origin, detail) => { celebrated.push({ kind, detail }); };
+    document.querySelectorAll = () => [];`);
+  harness.kinds = () => JSON.parse(harness.run('JSON.stringify(celebrated.map((item) => item.kind))'));
+  harness.details = () => JSON.parse(harness.run('JSON.stringify(celebrated.map((item) => item.detail))'));
+  return harness;
+}
+
+function elementFor(action, id) {
+  return { dataset: { action, id }, getBoundingClientRect: () => ({ left: 10, top: 20, width: 30, height: 40 }) };
+}
+
+function clickOn(listeners, action, id) {
+  const element = elementFor(action, id);
+  listeners.click({ target: { closest: () => element } });
+}
+
+test('start-timer celebrates once and stays silent when the task is already running', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'t', title:'T', status:'todo'}]; data.entries = [];`);
+  clickOn(listeners, 'start-timer', 't');
+  assert.deepEqual(kinds(), ['start']);
+  clickOn(listeners, 'start-timer', 't');
+  assert.deepEqual(kinds(), ['start']);
+});
+
+test('stop-timer celebrates with the elapsed time, and stop-all celebrates once for many timers', () => {
+  const { run, listeners, kinds, details } = celebrationClient();
+  run(`data.tasks = [{id:'a', title:'A', status:'in_progress'}, {id:'b', title:'B', status:'in_progress'}, {id:'c', title:'C', status:'in_progress'}];
+    data.entries = [
+      {id:'e1', taskId:'a', start: Date.now() - 60000, end: null},
+      {id:'e2', taskId:'b', start: Date.now() - 60000, end: null},
+      {id:'e3', taskId:'c', start: Date.now() - 60000, end: null}
+    ];`);
+  clickOn(listeners, 'stop-timer', 'e1');
+  assert.deepEqual(kinds(), ['stop']);
+  assert.match(details()[0], /^0:01:/);
+  clickOn(listeners, 'stop-timer', 'e1');
+  assert.deepEqual(kinds(), ['stop']);
+  clickOn(listeners, 'stop-all-timers', null);
+  assert.deepEqual(kinds(), ['stop', 'stop']);
+  assert.equal(details()[1], '2件');
+});
+
+test('completion outranks stop: cycling into done stops the timer with a complete celebration only', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'a', title:'A', status:'waiting_review'}];
+    data.entries = [{id:'e', taskId:'a', start: Date.now() - 5000, end: null}];`);
+  clickOn(listeners, 'cycle-status', 'a');
+  assert.equal(run("taskById('a').status"), 'done');
+  assert.notEqual(run("data.entries[0].end"), null);
+  assert.deepEqual(kinds(), ['complete']);
+});
+
+test('cycling through non-done states and leaving done celebrate nothing', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'a', title:'A', status:'todo'}]; data.entries = [];`);
+  clickOn(listeners, 'cycle-status', 'a');
+  clickOn(listeners, 'cycle-status', 'a');
+  assert.deepEqual(kinds(), []);
+  clickOn(listeners, 'cycle-status', 'a');
+  assert.deepEqual(kinds(), ['complete']);
+  clickOn(listeners, 'cycle-status', 'a');
+  assert.equal(run("taskById('a').status"), 'todo');
+  assert.deepEqual(kinds(), ['complete']);
+});
+
+test('kanban arrow keys celebrate only when moving into done', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'k', title:'K', status:'waiting_review'}]; data.entries = [];`);
+  const card = { dataset: { id: 'k' }, getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }) };
+  const press = (key) => listeners.keydown({
+    key, preventDefault() {},
+    target: { matches: () => false, isContentEditable: false, closest: (selector) => (selector === '.kanban-card' ? card : null) },
+  });
+  press('ArrowRight');
+  assert.deepEqual(kinds(), ['complete']);
+  press('ArrowLeft');
+  assert.equal(run("taskById('k').status"), 'waiting_review');
+  assert.deepEqual(kinds(), ['complete']);
+});
+
+test('kanban drop into done celebrates once and dropping within done does not repeat it', () => {
+  const { run, kinds } = celebrationClient();
+  run(`data.tasks = [{id:'d', title:'D', status:'waiting_review'}]; data.entries = [];`);
+  run(`globalThis.doneColumn = { dataset: { status: 'done' }, querySelectorAll: () => [] };
+    document.elementFromPoint = () => ({ closest: (selector) => (selector === '.kanban-column' ? doneColumn : null) });`);
+  const drag = () => run(`kanbanDrag = { pointerId: 1, taskId: 'd', started: true, overColumn: null,
+    element: { classList: { remove() {} }, style: {}, hasPointerCapture: () => false, releasePointerCapture() {} } };`);
+  drag();
+  run('finishKanbanDrag({ pointerId: 1, clientX: 5, clientY: 6 }, true)');
+  assert.equal(run("taskById('d').status"), 'done');
+  assert.deepEqual(kinds(), ['complete']);
+  drag();
+  run('finishKanbanDrag({ pointerId: 1, clientX: 5, clientY: 6 }, true)');
+  assert.deepEqual(kinds(), ['complete']);
+});
+
+test('stop-at form celebrates stop only when the end time is accepted', () => {
+  const { run, listeners, kinds } = celebrationClient();
+  run("data.entries = [{id:'r', taskId:'a', start:new Date('2020-01-01T10:00').getTime(), end:null}];");
+  const form = (end) => ({ dataset: { actionSubmit: 'stop-at', id: 'r' }, values: { end },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }) });
+  listeners.submit({ target: { closest: () => form('2099-01-01T12:00') }, preventDefault() {} });
+  assert.deepEqual(kinds(), []);
+  listeners.submit({ target: { closest: () => form('2020-01-01T11:00') }, preventDefault() {} });
+  assert.deepEqual(kinds(), ['stop']);
+});
+
+test('merge import adds only new ids and keeps existing data', () => {
+  const { run } = client();
+  run(`data.clients = [{id:'c1', name:'既存'}]; data.tasks = [{id:'t1', title:'既存タスク'}];
+    applyMerge(planMerge({clients:[{id:'c1', name:'上書きしない'}, {id:'c2', name:'新規'}], tasks:[{id:'t1', title:'X'}, {id:'t2', title:'新規タスク'}]}));`);
+  assert.equal(run("data.clients.find(c => c.id === 'c1').name"), '既存');
+  assert.equal(run('data.clients.length'), 2);
+  assert.equal(run('data.tasks.length'), 2);
+  run(`applyMerge(planMerge({tasks:[{id:'t2', title:'again'}]}));`);
+  assert.equal(run('data.tasks.length'), 2);
+});
+
+test('pasted checklist lines become separate subtasks', () => {
+  const { run } = client();
+  const lines = run(`parseChecklistLines('- [ ] 一つ目\\n- [x] 二つ目\\n\\n・三つ目\\n1. 四つ目')`);
+  assert.deepEqual([...lines], ['一つ目', '二つ目', '三つ目', '四つ目']);
+  run(`data.tasks = [{id:'t', title:'T'}]; addSubtasks('t', ['a', 'b']);`);
+  assert.equal(run("taskById('t').subtasks.length"), 2);
+});
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+test('inbox endpoints list sanitized files and move them only with the CSRF header', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-inbox-'));
+  const inbox = path.join(dir, 'imports');
+  fs.mkdirSync(inbox);
+  fs.writeFileSync(path.join(inbox, 'a.json'), JSON.stringify({ tasks: [{ id: 'x', title: 'X', status: 'bogus' }] }));
+  fs.writeFileSync(path.join(inbox, 'broken.json'), '{');
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(root, 'server.js')], {
+    env: { ...process.env, PORT: String(port), DATA_DIR: path.join(dir, 'data'), INBOX_DIR: inbox, BROWSER: 'none', NO_OPEN: '1' },
+    stdio: 'ignore',
+  });
+  try {
+    let list;
+    for (let i = 0; i < 50 && !list; i++) {
+      try { list = await (await fetch(`http://127.0.0.1:${port}/api/inbox`)).json(); } catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    assert.equal(list.files.length, 2);
+    assert.equal(list.files[0].content.tasks[0].status, 'todo');
+    assert.equal(list.files[1].error, 'invalid');
+    const noHeader = await fetch(`http://127.0.0.1:${port}/api/inbox/done`, { method: 'POST', body: '{"name":"a.json"}' });
+    assert.equal(noHeader.status, 400);
+    const bad = await fetch(`http://127.0.0.1:${port}/api/inbox/done`, { method: 'POST', headers: { 'X-Requested-With': 'enchanter' }, body: '{"name":"../a.json"}' });
+    assert.equal(bad.status, 400);
+    const ok = await fetch(`http://127.0.0.1:${port}/api/inbox/done`, { method: 'POST', headers: { 'X-Requested-With': 'enchanter' }, body: '{"name":"a.json"}' });
+    assert.equal((await ok.json()).moved, true);
+    assert.ok(fs.existsSync(path.join(inbox, '取り込み済み', 'a.json')));
+  } finally {
+    child.kill();
+  }
+});
+
+test('a failed inbox move answers 500 and leaves the server running', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-inbox-'));
+  const inbox = path.join(dir, 'imports');
+  fs.mkdirSync(inbox);
+  fs.writeFileSync(path.join(inbox, 'a.json'), '{}');
+  fs.writeFileSync(path.join(inbox, '取り込み済み'), 'フォルダーを作れなくする');
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(root, 'server.js')], {
+    env: { ...process.env, PORT: String(port), DATA_DIR: path.join(dir, 'data'), INBOX_DIR: inbox },
+    stdio: 'ignore',
+  });
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { await fetch(`http://127.0.0.1:${port}/api/inbox`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    const moved = await fetch(`http://127.0.0.1:${port}/api/inbox/done`, { method: 'POST', headers: { 'X-Requested-With': 'enchanter' }, body: '{"name":"a.json"}' });
+    assert.equal(moved.status, 500);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/inbox`)).status, 200);
+  } finally {
+    child.kill();
+  }
+});
+
+// checkInboxを本物のsave()で動かす。putは1回ごとのPUTの応答ステータス
+function inboxClient(putStatuses) {
+  const harness = client();
+  const log = { puts: 0, moved: [] };
+  const respond = (status, value, revision) => ({
+    status, ok: status < 300, json: async () => value,
+    headers: { get: (name) => (name === 'X-Data-Revision' ? revision : null) },
+  });
+  harness.context.fetch = async (url, options = {}) => {
+    if (url === '/api/inbox') {
+      return respond(200, { files: [{ name: 'a.json', content: { tasks: [{ id: 'inbox-task', title: 'X', status: 'todo' }] } }] });
+    }
+    if (url === '/api/inbox/done') {
+      log.moved.push(JSON.parse(options.body).name);
+      return respond(200, { moved: true });
+    }
+    if (options.method === 'PUT') return respond(putStatuses[log.puts++] ?? 204, null, 'next');
+    return respond(200, { tasks: [] }, 'next');
+  };
+  harness.run("save = realSave; dataRevision = 'old';");
+  harness.hasTask = () => harness.run("data.tasks.some((task) => task.id === 'inbox-task')");
+  return { ...harness, log };
+}
+
+test('checkInbox moves the file only after the import has been saved', async () => {
+  const { run, log, hasTask } = inboxClient([]);
+  await run('checkInbox()');
+  assert.equal(log.puts, 1);
+  assert.deepEqual(log.moved, ['a.json']);
+  assert.ok(hasTask());
+  assert.match(run('ui.inboxNotice'), /タスク 1 件/);
+});
+
+test('checkInbox keeps the file when a 409 throws the import away, then imports it next time', async () => {
+  const { run, log, hasTask } = inboxClient([409]);
+  await run('checkInbox()');
+  assert.equal(log.puts, 1);
+  assert.deepEqual(log.moved, []);
+  assert.equal(hasTask(), false);
+  await run('checkInbox()');
+  assert.deepEqual(log.moved, ['a.json']);
+  assert.ok(hasTask());
+});
+
+test('checkInbox keeps the file when saving fails and saves again before moving it', async () => {
+  const { run, log } = inboxClient([500]);
+  await run('checkInbox()');
+  assert.deepEqual(log.moved, []);
+  await run('checkInbox()');
+  assert.equal(log.puts, 2);
+  assert.deepEqual(log.moved, ['a.json']);
+  assert.equal(run("data.tasks.filter((task) => task.id === 'inbox-task').length"), 1);
+});
+
+test('checkInbox waits while the user is editing', async () => {
+  const { run, log, hasTask } = inboxClient([]);
+  run("ui.editingTask = 'other';");
+  await run('checkInbox()');
+  assert.equal(log.puts, 0);
+  assert.deepEqual(log.moved, []);
+  assert.equal(hasTask(), false);
+});
+
+test('clicking a tag chip toggles the tag filter', () => {
+  const { run, listeners } = client();
+  run(`data.tasks = [{id:'t', title:'T', status:'todo', tags:['2人']}];`);
+  const el = { dataset: { action: 'filter-by-tag', tag: '2人' } };
+  const event = { target: { closest: () => el } };
+  listeners.click(event);
+  assert.equal(run('ui.todoFilterTag'), '2人');
+  listeners.click(event);
+  assert.equal(run('ui.todoFilterTag'), '');
+  assert.ok(run('tagChips(data.tasks[0])').includes('data-action="filter-by-tag"'));
+});
+
+test('checklist progress board lists unfinished checklists first', () => {
+  const { run } = client();
+  const html = run(`checklistProgressBoard([
+    {id:'a', title:'Half', status:'todo', subtasks:[{id:'1', title:'x', done:true}, {id:'2', title:'y', done:false}]},
+    {id:'b', title:'None', status:'todo', subtasks:[{id:'3', title:'z', done:false}]},
+    {id:'c', title:'NoList', status:'todo'}
+  ])`);
+  assert.ok(html.indexOf('None') < html.indexOf('Half'));
+  assert.ok(!html.includes('NoList'));
+  assert.ok(html.includes('1/3'));
 });
 
 test('an edit made while an external-change check is running is not dropped silently', async () => {

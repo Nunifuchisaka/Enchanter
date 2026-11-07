@@ -16,6 +16,13 @@ function parseEstimate(value) {
   return Number.isFinite(num) && num > 0 ? Math.round(num) : null;
 }
 
+// 複数行のテキスト(箇条書き・Markdownのチェックリストなど)を1行1件のサブタスクにする
+function parseChecklistLines(text) {
+  return String(text).split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*+・•]\s*)?(?:\[[ xX]\]\s*)?(?:\d+[.)．]\s*)?/, '').trim())
+    .filter(Boolean);
+}
+
 // フォームのタグ入力(カンマ/読点区切り)を、トリム済み・空要素なし・重複なしの配列へ正規化
 function parseTags(value) {
   const seen = new Set();

@@ -745,3 +745,86 @@ details.done-section > summary {
   color: var(--danger);
   font-weight: 600;
 }
+
+/* ---------- チェックリストの進み具合 ---------- */
+
+.progress-board {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.progress-board > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.progress-board-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.progress-board-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 160px 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.progress-board-title {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-board-title:hover,
+.progress-board-title:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.progress-board .progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-board .progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.progress-board-row.complete .progress-fill {
+  background: var(--ok);
+}
+
+.progress-board-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-sub);
+}
+
+@keyframes flash-highlight {
+  from { box-shadow: 0 0 0 3px var(--accent); }
+  to { box-shadow: 0 0 0 3px transparent; }
+}
+
+.flash-highlight {
+  animation: flash-highlight 1.6s ease-out;
+}

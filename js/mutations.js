@@ -25,31 +25,38 @@ function undoDeletion() {
 }
 
 // 複数タスクの並行計測に対応(同じタスクの二重計測のみ防ぐ)
+// 計測を実際に開始したらtrueを返す(演出の発火判定に使う)
 function startTimer(taskId) {
-  if (runningEntryForTask(taskId)) return;
+  if (runningEntryForTask(taskId)) return false;
   const task = taskById(taskId);
-  if (!task) return;
+  if (!task) return false;
   if (task.status === 'todo') task.status = 'in_progress';
   data.entries.push({ id: uid(), taskId, start: Date.now(), end: null });
   save();
   renderAll();
+  return true;
 }
 
+// 実際に停止した作業記録を返す。停止していなければnull
 function stopTimer(entryId) {
   const entry = entryById(entryId);
   if (entry && entry.end === null) {
     entry.end = Date.now();
     save();
     syncEntryToGoogle(entry);
+    return entry;
   }
+  return null;
 }
 
+// 停止した作業記録の一覧を返す
 function stopAllTimers() {
   const now = Date.now();
   const stopped = runningEntries();
   stopped.forEach((entry) => { entry.end = now; });
   save();
   stopped.forEach(syncEntryToGoogle);
+  return stopped;
 }
 
 // ステータスを直接設定し、付随する副作用(完了時刻・計測停止・繰り返し次回生成)を適用する。
@@ -138,6 +145,15 @@ function removeTaskWithAnimation(id, button) {
   };
   row.addEventListener('animationend', (event) => { if (event.target === row) finish(); });
   setTimeout(finish, TASK_REMOVE_ANIMATION_MS + 150); // animationendが来ない場合の保険
+}
+
+function addSubtasks(taskId, titles) {
+  const task = taskById(taskId);
+  if (!task || !titles.length) return;
+  if (!task.subtasks) task.subtasks = [];
+  for (const title of titles) task.subtasks.push({ id: uid(), title, done: false });
+  save();
+  renderAll();
 }
 
 function deleteSubtask(taskId, subtaskId) {

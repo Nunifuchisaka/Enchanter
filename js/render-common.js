@@ -179,7 +179,11 @@ function repeatChip(task) {
 }
 
 function tagChips(task) {
-  return (task.tags || []).map((tag) => `<span class="chip tag-chip">🏷 ${esc(tag)}</span>`).join('');
+  // タグを押すとそのタグで絞り込む(絞り込み中のタグをもう一度押すと解除)
+  return (task.tags || []).map((tag) => {
+    const active = ui.todoFilterTag === tag;
+    return `<button type="button" class="chip tag-chip${active ? ' active' : ''}" data-action="filter-by-tag" data-tag="${esc(tag)}" aria-pressed="${active}" title="${active ? 'タグの絞り込みを解除' : 'このタグで絞り込む'}">🏷 ${esc(tag)}</button>`;
+  }).join('');
 }
 
 // 資料リンク。新しいタブで開き、遷移先に元ページを渡さない

@@ -28,18 +28,18 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 | --- | --- |
 | 定数・表示名(状態・重要度・繰り返し) | `js/constants.js` |
 | 日付・時刻の計算/表示 | `js/time.js` |
-| `data`/`ui`の定義、保存(`save`)、読み込み、Google連携のクライアント側、`taskById`などの検索 | `js/state.js` |
+| `data`/`ui`の定義、保存(`save`)、読み込み、受信箱の取り込み(`checkInbox`)、Google連携のクライアント側、`taskById`などの検索 | `js/state.js` |
 | 絞り込み・並び順・繰り返し生成・タグ解析など純粋なロジック | `js/domain.js` |
 | データを変更する操作(タイマー・状態変更・削除/取り消し)、URLハッシュ | `js/mutations.js` |
 | 描画の共通部品(`esc`、選択肢、チップ、Todo/カンバン共通の絞り込みUI) | `js/render-common.js` |
 | 各タブの描画 | `js/tab-todo.js` / `tab-kanban.js` / `tab-timeline.js` / `tab-gantt.js` / `tab-report.js` / `tab-manage.js` |
-| CSV出力・バックアップのインポート | `js/export.js` |
-| `renderAll`(画面全体の再描画)・計測中表示 | `js/render-app.js`(全タブより後に読み込む) |
+| CSV出力・バックアップのインポート・追加インポート | `js/export.js` |
+| `renderAll`(画面全体の再描画)・計測中表示・祝福演出(`celebrate`) | `js/render-app.js`(全タブより後に読み込む) |
 | クリック・入力・送信・ドラッグ・キーボードの処理 | `js/events.js` |
 | 経過時間の毎秒更新・`init()` | `js/main.js`(最後に読み込む) |
 | スタイル | `css/base.css`(トークン・共通部品) / `css/<タブ名>.css` / `css/responsive.css`(最後。全タブを上書き) |
 | データの検証(`sanitizeData`)・ファイルの読み書き・バックアップ・リビジョン | `store.js`(server.jsとcli.jsが共用) |
-| API・静的配信・Googleカレンダー連携 | `server.js` |
+| API・静的配信・受信箱(`imports/`)・Googleカレンダー連携 | `server.js` |
 | タスク操作CLI | `cli.js`(`js/`のconstants〜mutationsをvmで読み込んで画面と同じ副作用を再利用する) |
 | テスト | `tests/task-improvements.test.js`(画面・ロジック) / `tests/static-assets.test.js`(配信) / `tests/cli.test.js`(CLI・同時編集) |
 
@@ -64,7 +64,7 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 
 信頼境界は「ポートに到達できる者すべて」。
 
-- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
+- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`、`POST /api/inbox/done`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
 - データファイルへの書き込みは必ず`store.js`の`writeData()`(内部で`sanitizeData()`を通す)を使う。`color`・`estimateMinutes`などクライアントが`esc()`なしでHTML属性に埋め込む値はここで形式を強制している。HTML属性に描画する列挙型の項目を追加するときは、サーバー側で検証するか描画時に`esc()`する
 - 静的ファイルは`/`・`/index.html`と、`/js/`・`/css/`直下の英小文字・数字・ハイフン名のファイルだけを配信する(`staticRouteFor()`)
 
@@ -76,3 +76,7 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 ## Claude Codeの運用指示
 
 - このリポジトリでplan-modeの設計作業をPlan(またはその他の設計系)サブエージェントに委任する場合は、`model: "fable"`を指定して起動すること
+
+### 秘書の受信箱(imports/)
+
+`imports/`直下の`*.json`は`GET /api/inbox`で`sanitizeData()`を通して返され、`js/state.js`の`checkInbox()`が`js/export.js`の`planMerge()`/`applyMerge()`でid単位に追加取り込みし、保存成功後に`POST /api/inbox/done`で`imports/取り込み済み/`へ移す。`data/enchanter-data.json`をAIが読まずにタスクを渡すための仕組みなので、Claudeがタスクを追加するときはここにJSONを置く(idは`vrc-<名前>`のように固定にして重複を防ぐ)

@@ -21,7 +21,7 @@ function subtaskBlockHtml(task) {
             </li>`).join('')}
         </ul>
         <form class="subtask-add-form" data-action-submit="add-subtask" data-id="${esc(task.id)}">
-          <input type="text" name="title" placeholder="サブタスクを追加..." aria-label="サブタスク名" required>
+          <input type="text" name="title" placeholder="サブタスクを追加...(複数行の貼り付けで一括追加)" aria-label="サブタスク名" required>
           <button class="btn-icon" type="submit" title="サブタスクを追加" aria-label="サブタスクを追加">＋</button>
         </form>
       </div>
@@ -100,7 +100,7 @@ function todoTaskRow(task, now) {
   const statusClass = statusRowClass(task);
   const isToday = task.todayDate === todayStr();
   return `
-    <li class="task-item ${statusClass}${isDueToday(task) ? ' due-today' : ''}">
+    <li data-task-row="${esc(task.id)}" class="task-item ${statusClass}${isDueToday(task) ? ' due-today' : ''}">
       <button type="button" class="status-toggle${statusClass ? ' status-' + statusClass : ''}"
         data-action="cycle-status" data-id="${esc(task.id)}"
         aria-label="ステータス: ${TASK_STATUS_LABELS[task.status]}(クリックで次の状態へ)"
@@ -233,6 +233,35 @@ function todoCreateCard() {
     </div>`;
 }
 
+// チェックリストを持つ進行中タスクの達成度を、残りが多い順に一覧する(Todoの絞り込みに従う)
+function checklistProgressBoard(activeTasks) {
+  const rows = activeTasks
+    .filter((task) => (task.subtasks || []).length)
+    .map((task) => {
+      const total = task.subtasks.length;
+      const doneCount = task.subtasks.filter((subtask) => subtask.done).length;
+      return { task, total, doneCount, ratio: doneCount / total };
+    })
+    .sort((a, b) => a.ratio - b.ratio || parseLevel(b.task.importance) - parseLevel(a.task.importance) || (b.total - b.doneCount) - (a.total - a.doneCount));
+  if (!rows.length) return '';
+  const allTotal = rows.reduce((sum, row) => sum + row.total, 0);
+  const allDone = rows.reduce((sum, row) => sum + row.doneCount, 0);
+  const percent = (value) => Math.round(value * 100);
+  return `
+    <details class="progress-board" data-details-key="progress-board">
+      <summary>📊 チェックリストの進み具合 <span class="section-count">${allDone}/${allTotal}(${percent(allDone / allTotal)}%)</span></summary>
+      <ul class="progress-board-list">
+        ${rows.map(({ task, total, doneCount, ratio }) => `
+          <li class="progress-board-row${doneCount === total ? ' complete' : ''}">
+            <span class="chip-dot" style="background:${projectColor(task.projectId)}"></span>
+            <button type="button" class="progress-board-title" data-action="jump-to-task" data-id="${esc(task.id)}" title="タスクの位置へ移動">${esc(task.title)}</button>
+            <span class="progress" aria-hidden="true"><span class="progress-fill" style="width:${percent(ratio)}%"></span></span>
+            <span class="progress-board-count">${doneCount}/${total}</span>
+          </li>`).join('')}
+      </ul>
+    </details>`;
+}
+
 function renderTodo() {
   const now = Date.now();
   reconcileTodoProjectFilter();
@@ -280,6 +309,7 @@ function renderTodo() {
         <span class="task-overview">${active.length + inProgress.length + waitingReview.length}件の進行中タスク</span>
       </div>
       ${todoFilterRow()}
+      ${checklistProgressBoard(activeTasks)}
       <div class="todo-columns">
         <div class="todo-column">
           ${todoTaskGroup(todayGroup, now)}

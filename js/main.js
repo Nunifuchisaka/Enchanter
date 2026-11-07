@@ -60,6 +60,11 @@ async function init() {
     history.replaceState(null, '', location.pathname);
   }
   renderAll();
+  // データの読み込みに成功した後だけ確認する(読み込み前に足すと空データで上書きしてしまう)
+  checkInbox();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkInbox();
+  });
 }
 
 init();

@@ -11,13 +11,18 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 // テストはvm上でこのファイルを実行するため、相対パスではなく__dirname基準で読み込む
-const { createStore, readJsonSafe, writeJsonAtomic } = require(path.join(__dirname, 'store.js'));
+const { createStore, sanitizeData, readJsonSafe, writeJsonAtomic } = require(path.join(__dirname, 'store.js'));
 
 // ---- 設定 ----
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '127.0.0.1';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const MAX_BODY = 20 * 1024 * 1024;
+// 秘書(Claude)が置くタスクの受信箱。直下の*.jsonをアプリが開いたときに追加取り込みし、済んだものは下のフォルダーへ移す
+const INBOX_DIR = process.env.INBOX_DIR || path.join(__dirname, 'imports');
+const INBOX_DONE_DIR = path.join(INBOX_DIR, '取り込み済み');
+const INBOX_NAME_RE = /^[^\\/:*?"<>|]+\.json$/;
+const MAX_INBOX_FILE = 2 * 1024 * 1024;
 const store = createStore(DATA_DIR);
 const { writeData } = store;
 
@@ -359,6 +364,63 @@ function handleSyncEntryRequest(req, res) {
   });
 }
 
+// ---- 受信箱(imports/) ----
+
+function isInboxName(name) {
+  return typeof name === 'string' && INBOX_NAME_RE.test(name) && path.basename(name) === name;
+}
+
+// 受信箱のファイルを読み、表示・取り込みに使う前にsanitizeDataで整える。読めないファイルはerrorとして返す
+function listInbox() {
+  if (!fs.existsSync(INBOX_DIR)) return [];
+  return fs.readdirSync(INBOX_DIR, { withFileTypes: true })
+    .filter((dirent) => dirent.isFile() && isInboxName(dirent.name))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(({ name }) => {
+      const file = path.join(INBOX_DIR, name);
+      try {
+        if (fs.statSync(file).size > MAX_INBOX_FILE) return { name, error: 'too_large' };
+        const parsed = parseJsonObject(fs.readFileSync(file, 'utf8'));
+        return { name, content: sanitizeData(parsed) };
+      } catch {
+        return { name, error: 'invalid' };
+      }
+    });
+}
+
+// 取り込み済みのファイルを 取り込み済み/ へ移す。同名があれば時刻を付けて残す
+function markInboxDone(name) {
+  const source = path.join(INBOX_DIR, name);
+  if (!fs.existsSync(source)) return false;
+  fs.mkdirSync(INBOX_DONE_DIR, { recursive: true });
+  let target = path.join(INBOX_DONE_DIR, name);
+  if (fs.existsSync(target)) target = path.join(INBOX_DONE_DIR, name.replace(/\.json$/, `-${Date.now()}.json`));
+  fs.renameSync(source, target);
+  return true;
+}
+
+function handleInboxDoneRequest(req, res) {
+  readBody(req, res, (body) => {
+    let payload;
+    try {
+      payload = parseJsonObject(body);
+    } catch {
+      sendJson(res, 400, { error: '不正なJSONです' });
+      return;
+    }
+    if (!isInboxName(payload.name)) {
+      sendJson(res, 400, { error: '不正なファイル名です' });
+      return;
+    }
+    // readBodyのコールバックは非同期なので、ファイル移動の例外をここで捕まえないとプロセスが落ちる
+    try {
+      sendJson(res, 200, { moved: markInboxDone(payload.name) });
+    } catch (error) {
+      sendInternalError(res, error);
+    }
+  });
+}
+
 // ---- 静的ファイル ----
 
 function serveStatic(res, { file, type }) {
@@ -410,6 +472,16 @@ function routeRequest(req, res) {
 
   if (url.pathname === OAUTH_REDIRECT_PATH) {
     if (allowMethod(req, res, 'GET')) handleOAuthCallback(url, res).catch((error) => sendInternalError(res, error));
+    return;
+  }
+
+  if (url.pathname === '/api/inbox') {
+    if (allowMethod(req, res, 'GET')) sendJson(res, 200, { files: listInbox() });
+    return;
+  }
+
+  if (url.pathname === '/api/inbox/done') {
+    if (allowMethod(req, res, 'POST') && requireCsrfHeader(req, res)) handleInboxDoneRequest(req, res);
     return;
   }
 

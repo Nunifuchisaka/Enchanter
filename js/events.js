@@ -20,8 +20,30 @@ document.addEventListener('click', (event) => {
   if (!element) return;
   const action = element.dataset.action;
   const id = element.dataset.id;
+  let celebration = null;
 
   switch (action) {
+    case 'filter-by-tag': {
+      const tag = element.dataset.tag || '';
+      ui.todoFilterTag = ui.todoFilterTag === tag ? '' : tag;
+      ui.activeFilterId = null;
+      if (ui.tab !== 'todo' && ui.tab !== 'kanban') ui.tab = 'todo';
+      break;
+    }
+    case 'jump-to-task': {
+      // 再描画せずに該当タスクへスクロールし、一瞬強調する
+      const row = [...document.querySelectorAll('[data-task-row]')].find((item) => item.dataset.taskRow === id);
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.remove('flash-highlight');
+        void row.offsetWidth;
+        row.classList.add('flash-highlight');
+      }
+      return;
+    }
+    case 'dismiss-inbox-notice':
+      ui.inboxNotice = '';
+      break;
     case 'undo-delete':
       undoDeletion();
       break;
@@ -48,15 +70,23 @@ document.addEventListener('click', (event) => {
       ui.todoFilterTag = '';
       ui.activeFilterId = null;
       break;
-    case 'start-timer':
-      startTimer(id);
+    case 'start-timer': {
+      const origin = centerOf(element);
+      if (startTimer(id)) celebrate('start', origin);
       return;
-    case 'stop-timer':
-      stopTimer(id);
+    }
+    case 'stop-timer': {
+      const origin = centerOf(element);
+      const entry = stopTimer(id);
+      if (entry) celebration = { kind: 'stop', origin, detail: fmtClock(entry.end - entry.start) };
       break;
-    case 'stop-all-timers':
-      stopAllTimers();
+    }
+    case 'stop-all-timers': {
+      const origin = centerOf(element);
+      const stopped = stopAllTimers();
+      if (stopped.length) celebration = { kind: 'stop', origin, detail: `${stopped.length}件` };
       break;
+    }
     case 'edit-task':
       clearEditing();
       ui.editingTask = id;
@@ -66,8 +96,11 @@ document.addEventListener('click', (event) => {
     case 'cycle-status': {
       const task = taskById(id);
       if (!task) return;
+      const origin = centerOf(element);
+      const wasDone = task.status === 'done';
       setTaskStatus(task, nextTaskStatus(task.status));
       save();
+      if (!wasDone && task.status === 'done') celebration = { kind: 'complete', origin };
       break;
     }
     case 'del-task':
@@ -162,6 +195,7 @@ document.addEventListener('click', (event) => {
       return;
   }
   renderAll();
+  if (celebration) celebrate(celebration.kind, celebration.origin, celebration.detail);
 });
 
 document.addEventListener('change', (event) => {
@@ -238,6 +272,12 @@ document.addEventListener('change', (event) => {
       if (file) importBackup(file); // 確認・保存・再描画はimportBackup側で行う
       return;
     }
+    case 'merge-import': {
+      const file = element.files && element.files[0];
+      element.value = '';
+      if (file) mergeImport(file); // 確認・保存・再描画はmergeImport側で行う
+      return;
+    }
     case 'tl-date':
       if (element.value) ui.timelineDate = element.value;
       break;
@@ -275,6 +315,17 @@ function trimmedField(formData, name) {
   return String(formData.get(name)).trim();
 }
 
+// サブタスク欄に複数行を貼り付けたら、1行ずつ別のサブタスクとして追加する
+document.addEventListener('paste', (event) => {
+  const input = event.target;
+  const form = input && input.closest && input.closest('form[data-action-submit="add-subtask"]');
+  if (!form || !event.clipboardData) return;
+  const lines = parseChecklistLines(event.clipboardData.getData('text'));
+  if (lines.length < 2) return;
+  event.preventDefault();
+  addSubtasks(form.dataset.id, lines);
+});
+
 document.addEventListener('submit', (event) => {
   const form = event.target.closest('[data-action-submit]');
   if (!form) return;
@@ -282,6 +333,7 @@ document.addEventListener('submit', (event) => {
   const formData = new FormData(form);
   const id = form.dataset.id;
   let syncEntry = null;
+  let celebration = null;
 
   switch (form.dataset.actionSubmit) {
     case 'stop-at': {
@@ -294,6 +346,7 @@ document.addEventListener('submit', (event) => {
       }
       entry.end = end;
       syncEntry = entry;
+      celebration = { kind: 'stop', origin: centerOf(form), detail: fmtClock(end - entry.start) };
       break;
     }
     case 'add-task': {
@@ -476,6 +529,7 @@ document.addEventListener('submit', (event) => {
   save();
   renderAll();
   if (syncEntry) syncEntryToGoogle(syncEntry);
+  if (celebration) celebrate(celebration.kind, celebration.origin, celebration.detail);
 });
 
 document.addEventListener('pointerdown', (event) => {
@@ -607,9 +661,11 @@ function finishKanbanDrag(event, commit) {
   if (!commit || !drag.started || !column) return;
   const task = taskById(drag.taskId);
   if (!task) return;
+  const wasDone = task.status === 'done';
   reorderKanbanTask(task, column.dataset.status, position.before?.dataset.id, position.after?.dataset.id);
   save();
   renderAll();
+  if (!wasDone && task.status === 'done') celebrate('complete', { x: event.clientX, y: event.clientY });
 }
 
 document.addEventListener('pointerup', (event) => { finishKanbanDrag(event, true); finishGanttDrag(event, true); });
@@ -645,9 +701,12 @@ document.addEventListener('keydown', (event) => {
     const nextIndex = currentIndex + (event.key === 'ArrowRight' ? 1 : -1);
     if (nextIndex < 0 || nextIndex >= TASK_STATUS_ORDER.length) return;
     event.preventDefault();
+    const origin = centerOf(kanbanCardTarget);
+    const wasDone = task.status === 'done';
     if (setTaskStatus(task, TASK_STATUS_ORDER[nextIndex])) {
       save();
       renderAll();
+      if (!wasDone && task.status === 'done') celebrate('complete', origin);
       const movedCard = [...document.querySelectorAll('.kanban-card')]
         .find((card) => card.dataset.id === task.id);
       const movedCardControl = movedCard ? movedCard.querySelector('.kanban-card-control') : null;

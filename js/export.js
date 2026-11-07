@@ -100,3 +100,62 @@ function importBackup(file) {
   };
   reader.readAsText(file);
 }
+
+// 取り込むJSONの中身を、既存データを残したまま追加する。同じidの項目は既存を優先して取り込まない
+// (同じファイルを何度取り込んでも重複しない)。参照先のプロジェクト等が無いタスクも取り込み、表示は「なし」になる
+const MERGE_KEYS = ['clients', 'categories', 'projects', 'tasks', 'entries', 'filters'];
+const MERGE_LABELS = { clients: 'クライアント', categories: 'カテゴリ', projects: 'プロジェクト', tasks: 'タスク', entries: '作業記録', filters: '保存済みフィルター' };
+
+function planMerge(incoming) {
+  const plan = {};
+  for (const key of MERGE_KEYS) {
+    const existingIds = new Set((data[key] || []).map((item) => item.id));
+    const items = (incoming[key] || []).filter((item) => item && typeof item === 'object' && !Array.isArray(item));
+    const added = [];
+    let skipped = 0;
+    for (const item of items) {
+      if (item.id && existingIds.has(item.id)) { skipped++; continue; }
+      const copy = { ...item, id: item.id || uid() };
+      existingIds.add(copy.id);
+      added.push(copy);
+    }
+    plan[key] = { added, skipped };
+  }
+  return plan;
+}
+
+function applyMerge(plan) {
+  for (const key of MERGE_KEYS) {
+    if (!data[key]) data[key] = [];
+    data[key].push(...plan[key].added);
+  }
+}
+
+function mergeImport(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result));
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid shape');
+      for (const key of MERGE_KEYS) {
+        if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error('invalid shape');
+      }
+      const plan = planMerge(parsed);
+      const lines = MERGE_KEYS
+        .filter((key) => plan[key].added.length || plan[key].skipped)
+        .map((key) => `${MERGE_LABELS[key]}: 追加 ${plan[key].added.length} 件` + (plan[key].skipped ? `(既にあるため ${plan[key].skipped} 件はスキップ)` : ''));
+      if (!lines.some((line) => !line.includes('追加 0 件'))) {
+        alert('追加できる新しい項目はありませんでした(すべて取り込み済みです)。');
+        return;
+      }
+      if (!confirm(`現在のデータはそのまま残し、次の内容を追加します。\n${lines.join('\n')}\nよろしいですか?`)) return;
+      applyMerge(plan);
+      save();
+      renderAll();
+    } catch (error) {
+      console.error('追加インポートに失敗しました', error);
+      alert('ファイルを読み込めませんでした。Enchanter形式のJSONファイルか確認してください。');
+    }
+  };
+  reader.readAsText(file);
+}

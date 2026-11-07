@@ -97,11 +97,12 @@ function manageBackupCard() {
   return `
     <div class="card">
       <h2>💾 バックアップ</h2>
-      <p class="backup-note">全データ(クライアント・プロジェクト・カテゴリ・タスク・作業記録)をJSONで書き出し/読み込みできます。インポートは現在のデータを全て置き換えます。</p>
+      <p class="backup-note">全データ(クライアント・プロジェクト・カテゴリ・タスク・作業記録)をJSONで書き出し/読み込みできます。「インポート(全置き換え)」は現在のデータを全て置き換えます。「追加インポート」は今のデータを残したまま、ファイル内のまだ無い項目(idで判定)だけを追加します。</p>
       <p class="backup-note">自動バックアップ：各日の最初の保存前データをサーバーのデータフォルダー内の backups/enchanter-日付.json に保持します。復元はそのファイルをインポートしてください。自動削除はしません。</p>
       <div class="backup-actions">
         <button class="btn" data-action="export-backup">⬇ エクスポート</button>
-        <label class="btn file-btn" role="button" tabindex="0">⬆ インポート<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
+        <label class="btn file-btn" role="button" tabindex="0">⬆ インポート(全置き換え)<input type="file" accept=".json,application/json" data-action-change="import-backup" hidden></label>
+        <label class="btn file-btn" role="button" tabindex="0">➕ 追加インポート<input type="file" accept=".json,application/json" data-action-change="merge-import" hidden></label>
       </div>
     </div>`;
 }

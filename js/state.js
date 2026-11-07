@@ -32,6 +32,7 @@ const ui = {
   editingProject: null,
   editingCategory: null,
   googleStatus: { configured: false, connected: false },
+  inboxNotice: '',
 };
 
 // 進行中のドラッグ操作(ポインターイベントの途中経過)
@@ -185,6 +186,58 @@ function checkExternalChange() {
       if (revision !== dataRevision && pendingSaves === 0) await reloadAfterExternalChange();
     })
     .catch((error) => console.warn('データの更新確認に失敗しました', error));
+}
+
+// 秘書(Claude)が imports/ に置いたファイルを取り込む。開いたとき・タブに戻ったときに確認する
+let inboxChecking = false;
+async function checkInbox() {
+  if (inboxChecking) return;
+  inboxChecking = true;
+  try {
+    const response = await fetch('/api/inbox');
+    if (!response.ok) return; // 受信箱に対応していない古いサーバーでは何もしない
+    const { files = [] } = await response.json();
+    if (!files.length) return;
+    // 保存や外部変更の取り込みが済んでから足す(読み直しの最中に足すと取り込みごと消える)
+    await saveChain;
+    if (isUserBusy()) return; // 再描画で入力が消えるので次の機会に回す
+    const generation = dataGeneration;
+    let addedTasks = 0;
+    let addedOther = 0;
+    const doneNames = [];
+    const broken = [];
+    for (const file of files) {
+      if (file.error || !file.content) { broken.push(file.name); continue; }
+      const plan = planMerge(file.content);
+      applyMerge(plan);
+      addedTasks += plan.tasks.added.length;
+      addedOther += MERGE_KEYS.filter((key) => key !== 'tasks').reduce((sum, key) => sum + plan[key].added.length, 0);
+      doneNames.push(file.name);
+    }
+    // 全件スキップでも保存する(前回の保存失敗でメモリにだけ残った分を、ファイルを移す前に確定させる)
+    if (doneNames.length) save();
+    await saveChain; // 保存が終わってからファイルを移す(保存前に移すと取り込みが失われるため)
+    // 409や読み直しで取り込みが捨てられた場合も世代が変わる。ファイルは残し、次回また取り込む
+    if (saveWarned || generation !== dataGeneration) return;
+    for (const name of doneNames) {
+      await fetch('/api/inbox/done', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
+        body: JSON.stringify({ name }),
+      });
+    }
+    const parts = [];
+    if (addedTasks || addedOther) parts.push(`📬 秘書から タスク ${addedTasks} 件${addedOther ? `(ほか ${addedOther} 件)` : ''} を追加しました`);
+    if (broken.length) parts.push(`読めないファイルがありました: ${broken.join(', ')}`);
+    if (parts.length) {
+      ui.inboxNotice = parts.join('。');
+      renderAll();
+    }
+  } catch (error) {
+    console.error('受信箱の確認に失敗しました', error);
+  } finally {
+    inboxChecking = false;
+  }
 }
 
 // 旧localStorage版のデータが残っていて、かつファイル側が空なら移行を提案する
