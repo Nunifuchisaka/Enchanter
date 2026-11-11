@@ -634,10 +634,14 @@ test('sanitizeData accepts Windows paths and file URLs as normalized file URLs a
     { url: 'D:relative.mp4' },
     { url: 'javascript:alert(1)' },
     { url: 'D:\\a\u0000b.mp4' },
+    { url: 'e:\\小文字\\x.mp4' },
+    { url: 'file:///e:/%E5%B0%8F%E6%96%87%E5%AD%97/x.mp4' },
   ] }] }).tasks[0];
+  // ドライブ名はブラウザのURLと同じく大文字にそろえる
   assert.deepEqual(task.links, [
     { url: 'file:///D:/YouTube/zundamon-video/kaihen/talk-intro/talk-intro.mp4', title: '動画' },
     { url: 'file:///D:/%E5%8B%95%E7%94%BB/a%20b.mp4', title: null },
+    { url: 'file:///E:/%E5%B0%8F%E6%96%87%E5%AD%97/x.mp4', title: null },
   ]);
   // 空白・日本語・#・?・%などはurl.pathToFileURLと同じ形になる([ ] ^ ~ はNodeだけがエンコードするので対象外)
   for (const sample of ['D:\\a b\\日本語 #1?&+,=%.mp4', 'D:\\YouTube\\talk-intro.mp4', 'C:\\Users\\x\\(1){3}.png']) {
@@ -737,6 +741,11 @@ test('POST /api/open-local opens only registered files with allowed extensions t
 
     assert.equal((await open(stored[0])).status, 204);
     assert.deepEqual(JSON.parse(JSON.stringify(run('opened'))), [fs.realpathSync(video)]);
+    // 表記の違うURL(エンコードなし・ドライブ名が小文字)でも、正規化して登録済みのリンクと照合する
+    const otherSpelling = decodeURI(stored[0]).replace(/^file:\/\/\/([A-Z]):/, (_, drive) => `file:///${drive.toLowerCase()}:`);
+    assert.notEqual(otherSpelling, stored[0]);
+    assert.equal((await open(otherSpelling)).status, 204);
+    assert.equal(run('opened.length'), 2);
     assert.equal(run("isOpenableLocalFile('C:\\\\a.exe:x.mp4')"), false);
     assert.equal(run("isOpenableLocalFile('C:\\\\a\\\\b.MP4')"), true);
   } finally {

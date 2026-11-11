@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { fileURLToPath } = require('url');
 // テストはvm上でこのファイルを実行するため、相対パスではなく__dirname基準で読み込む
-const { createStore, sanitizeData, readJsonSafe, writeJsonAtomic } = require(path.join(__dirname, 'store.js'));
+const { createStore, sanitizeData, safeLinkUrl, readJsonSafe, writeJsonAtomic } = require(path.join(__dirname, 'store.js'));
 
 // ---- 設定 ----
 const PORT = Number(process.env.PORT) || 8787;
@@ -460,8 +460,9 @@ function handleOpenLocalRequest(req, res) {
         sendJson(res, 400, { error: '不正なJSONです' });
         return;
       }
-      const { url } = payload;
-      if (typeof url !== 'string' || !/^file:/i.test(url)) {
+      // 画面側(ブラウザのURL)で正規化し直したURLが届くので、保存時と同じ規則でそろえてから照合する
+      const url = typeof payload.url === 'string' ? safeLinkUrl(payload.url) : null;
+      if (!url || !/^file:/i.test(url)) {
         sendJson(res, 400, { error: 'ローカルファイルのURLではありません' });
         return;
       }

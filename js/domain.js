@@ -68,7 +68,7 @@ function parseLinks(value) {
 }
 
 // 資料リンクのURLを正規化して返す。使えないものはnull(store.jsのsafeLinkUrlと同じ規則・同じ結果にすること)。
-// http/httpsはそのまま、Windowsの絶対パスとfile:のURLはfile:///D:/a/b.mp4の形(url.pathToFileURL相当。[ ] ^ ~ はエンコードしない)にそろえる
+// http/httpsはそのまま、Windowsの絶対パスとfile:のURLはfile:///D:/a/b.mp4の形(url.pathToFileURL相当。ドライブ名は大文字。[ ] ~ はエンコードしない)にそろえる
 function safeLinkUrl(value) {
   const text = String(value ?? '').trim();
   if (!text || /[\u0000-\u001f\u007f]/.test(text)) return null;
@@ -92,9 +92,10 @@ function safeLinkUrl(value) {
   return localPathToFileUrl(/^\/[A-Za-z]:\//.test(pathname) ? pathname.slice(1) : pathname);
 }
 
-// 区切りが/のローカルパス(D:/a/b.mp4 または /home/a.mp4)をfile URLにする
+// 区切りが/のローカルパス(D:/a/b.mp4 または /home/a.mp4)をfile URLにする。
+// ブラウザのURLはドライブ名を大文字にするがNodeはしないので、ここで大文字にそろえる
 function localPathToFileUrl(slashPath) {
-  const escaped = slashPath.replace(/^\/+/, '').replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F');
+  const escaped = slashPath.replace(/^\/+/, '').replace(/^[a-z](?=:)/, (drive) => drive.toUpperCase()).replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F');
   try {
     const url = new URL(`file:///${escaped}`);
     return url.host || url.search || url.hash ? null : url.href;
