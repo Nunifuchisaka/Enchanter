@@ -36,7 +36,7 @@ const HELP = `Enchanter CLI (サーバー不要。起動中の画面には数秒
 マスタ projects  (クライアント/プロジェクト/カテゴリ)
 オプション: -p プロジェクト -c カテゴリ --start 日付[T時刻] --end 日付[T時刻] -i 重要度0-3 -w 重さ0-3
   -e 見積(分) -t タグ(カンマ区切り) --note メモ -r daily|weekly|monthly
-  -l 資料リンク("URL" か "タイトル URL"。複数回可。editでは追加、-l - で全消去) --unlink 番号(editで削除)
+  -l 資料リンク("URL" か "タイトル URL"。URLはD:\\a\\b.mp4 のようなファイルのパスも可。複数回可。editでは追加、-l - で全消去) --unlink 番号(editで削除)
 日付: YYYY-MM-DD, M/D, today, tomorrow, +N, -N   id/プロジェクト名は一意なら前方一致・部分一致で可
 一覧の形式: id 状態 [!重要度] タイトル [@プロジェクト] [#タグ] [予定] [実績/見積] [☆今日] [▶計測中] [🔗リンク数] [小項目 済/全]`;
 
@@ -252,7 +252,7 @@ function applyTaskOptions(L, task, options) {
   if (options.start !== undefined || options.end !== undefined) applyPlan(L, task, options);
 }
 
-// -l は既存のリンクに追加する(addでは空から)。- で全消去。http/https以外は弾く
+// -l は既存のリンクに追加する(addでは空から)。- で全消去。http/https・ローカルファイル以外は弾く
 function applyLinks(L, task, values) {
   let links = [...(task.links || [])];
   for (const value of values) {
@@ -261,7 +261,7 @@ function applyLinks(L, task, values) {
       continue;
     }
     const parsed = L.parseLinks(value);
-    if (!parsed.length) fail(`http(s)のURLが見つかりません: ${value}`);
+    if (!parsed.length) fail(`http(s)のURLかローカルファイルのパスが見つかりません: ${value}`);
     for (const link of parsed) {
       links = links.filter((existing) => existing.url !== link.url);
       links.push(link);

@@ -41,6 +41,11 @@ document.addEventListener('click', (event) => {
       }
       return;
     }
+    case 'open-local-file':
+      // ブラウザはhttpのページからfile:を開けないので、サーバーに既定のアプリで開いてもらう
+      event.preventDefault();
+      openLocalFile(element.getAttribute('href'));
+      return;
     case 'dismiss-inbox-notice':
       ui.inboxNotice = '';
       break;

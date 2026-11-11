@@ -287,6 +287,23 @@ function syncEntryToGoogle(entry) {
   }).catch((error) => console.warn('Googleカレンダーへの同期に失敗しました', error));
 }
 
+// 資料リンクのローカルファイルを、サーバーのOSの既定のアプリで開いてもらう
+async function openLocalFile(url) {
+  try {
+    const response = await fetch('/api/open-local', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
+      body: JSON.stringify({ url }),
+    });
+    if (response.ok) return;
+    const body = await response.json().catch(() => ({}));
+    alert(body.error || 'ファイルを開けませんでした');
+  } catch (error) {
+    console.error('ローカルファイルを開けませんでした', error);
+    alert('ファイルを開けませんでした。サーバー(server.js)が起動しているか確認してください。');
+  }
+}
+
 async function connectGoogle() {
   try {
     const response = await fetch('/api/google/auth-url');

@@ -158,7 +158,9 @@ node cli.js sum --from -7                          # 直近1週間の作業時�
 
 `tags` はタスクに付ける自由入力のラベル(文字列配列)です。タグのマスタは持たず、全タスクの`tags`から使用中の一覧を導出します。
 
-`links` はタスクの資料リンク(`url`と任意の`title`)の配列です。`url`はhttp/httpsのみ保存されます。画面ではタスクの編集フォーム(または新規作成の詳細設定)に1行1件で「タイトル URL」またはURLだけを入力し、タスク行のリンクをクリックすると新しいタブで開きます。
+`links` はタスクの資料リンク(`url`と任意の`title`)の配列です。`url`はhttp/httpsとローカルファイル(`file:`)のみ保存されます。画面ではタスクの編集フォーム(または新規作成の詳細設定)に1行1件で「タイトル URL」またはURLだけを入力し、タスク行のリンクをクリックすると新しいタブで開きます。
+
+ローカルファイルは「イントロ動画 D:\YouTube\talk-intro.mp4」のようにWindowsの絶対パス(`D:/...`や`file:///D:/...`も可)を行末に書くと、`file:///D:/YouTube/talk-intro.mp4`の形で保存されます(CLIでは`-l "タイトル D:\path\file.mp4"`)。クリックするとEnchanterのサーバーがそのPCの既定のアプリで開きます。開けるのは資料リンクに登録した、動画・音声・画像・PDF・テキスト(mp4 mov mkv webm m4v avi wav mp3 m4a flac ogg png jpg jpeg gif webp pdf txt srt md)のファイルだけです。
 
 `categories` は「管理」タブで予め作成するカテゴリのマスタです。各タスクは`categoryId`でひとつのカテゴリを参照できます(未設定は`null`)。カテゴリを削除すると、参照していたタスクの`categoryId`は`null`(カテゴリなし)に戻ります。
 
