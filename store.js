@@ -50,24 +50,56 @@ function sanitizeTags(tags) {
   return sanitized;
 }
 
-// 資料リンクは[{ url, title }]。urlはhref属性に入るのでhttp/httpsのみ許可する(javascript:等を防ぐ)
+// 資料リンクのURLを正規化して返す。使えないものはnull(js/domain.jsのsafeLinkUrlと同じ規則・同じ結果にすること)。
+// urlはhref属性に入るのでhttp/httpsとローカルファイル(file:)だけを許可する(javascript:等を防ぐ)。
+// Windowsの絶対パスとfile:のURLはfile:///D:/a/b.mp4の形(url.pathToFileURL相当。ドライブ名は大文字。[ ] ~ はエンコードしない)にそろえる
+function safeLinkUrl(value) {
+  const text = String(value ?? '').trim();
+  if (!text || /[\u0000-\u001f\u007f]/.test(text)) return null;
+  if (/^[A-Za-z]:[\\/]/.test(text)) return localPathToFileUrl(text.replace(/\\/g, '/'));
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  // ホスト付き(UNC)・クエリ・フラグメント付き・区切り文字をエンコードしたものは受け付けない
+  if (url.protocol !== 'file:' || url.host || url.search || url.hash || /%2f|%5c/i.test(url.pathname)) return null;
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+  if (/[\u0000-\u001f\u007f]/.test(pathname)) return null;
+  return localPathToFileUrl(/^\/[A-Za-z]:\//.test(pathname) ? pathname.slice(1) : pathname);
+}
+
+// 区切りが/のローカルパス(D:/a/b.mp4 または /home/a.mp4)をfile URLにする。
+// ブラウザのURLはドライブ名を大文字にするがNodeはしないので、ここで大文字にそろえる
+function localPathToFileUrl(slashPath) {
+  const escaped = slashPath.replace(/^\/+/, '').replace(/^[a-z](?=:)/, (drive) => drive.toUpperCase()).replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F');
+  try {
+    const url = new URL(`file:///${escaped}`);
+    return url.host || url.search || url.hash ? null : url.href;
+  } catch {
+    return null;
+  }
+}
+
+// 資料リンクは[{ url, title }]。urlはsafeLinkUrlで正規化し、使えないものは捨てる
 function sanitizeLinks(links) {
   if (!Array.isArray(links)) return [];
   const seen = new Set();
   const sanitized = [];
   for (const link of links) {
     if (!link || typeof link.url !== 'string') continue;
-    let url;
-    try {
-      url = new URL(link.url.trim());
-    } catch {
-      continue;
-    }
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
-    if (seen.has(url.href)) continue;
-    seen.add(url.href);
+    const url = safeLinkUrl(link.url);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
     const title = typeof link.title === 'string' && link.title.trim() ? link.title.trim() : null;
-    sanitized.push({ url: url.href, title });
+    sanitized.push({ url, title });
   }
   return sanitized;
 }
@@ -236,4 +268,4 @@ function createStore(dataDir) {
   return { dataDir, dataFile, readData, readDataWithRevision, currentRevision, writeData };
 }
 
-module.exports = { createStore, sanitizeData, readJsonSafe, writeJsonAtomic };
+module.exports = { createStore, sanitizeData, safeLinkUrl, readJsonSafe, writeJsonAtomic };

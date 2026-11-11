@@ -180,3 +180,17 @@ test('links can be added, appended, removed and cleared from the CLI', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('-l with a Windows path stores a normalized file URL', () => {
+  const dir = tempDataDir(SAMPLE);
+  try {
+    const added = cli(dir, 'add', '動画の確認', '-l', 'イントロ D:\\YouTube\\zundamon-video\\kaihen\\talk-intro\\talk-intro.mp4', '-l', 'D:/動画/仮 版.mp4');
+    assert.equal(added.code, 0, added.err);
+    assert.deepEqual(readFile(dir).tasks.find((task) => task.title === '動画の確認').links, [
+      { url: 'file:///D:/YouTube/zundamon-video/kaihen/talk-intro/talk-intro.mp4', title: 'イントロ' },
+      { url: 'file:///D:/%E5%8B%95%E7%94%BB/%E4%BB%AE%20%E7%89%88.mp4', title: null },
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

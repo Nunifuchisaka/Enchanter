@@ -37,17 +37,27 @@ function parseTags(value) {
 }
 
 // 資料リンクの入力(1行に1件。「タイトル URL」またはURLだけ)を[{ url, title }]へ正規化する。
-// http/https以外(javascript:など)はhref属性に入れると危険なので捨てる。同じURLは1件にまとめる
+// http/https・file:のURLとWindowsの絶対パス(D:\a\b.mp4)を受け付け、それ以外(javascript:など)は
+// href属性に入れると危険なので捨てる。同じURLは1件にまとめる
+const LINK_URL_TOKEN_RE = /(?:https?:\/\/|file:)\S+/gi;
+// Windowsのパスは空白を含みうるので、行末までをパスとみなす(引用符で囲んでもよい)
+const LINK_WINDOWS_PATH_TAIL_RE = /(?:^|\s)(["']?)([A-Za-z]:[\\/].*?)\1\s*$/;
+
 function parseLinks(value) {
   const seen = new Set();
   const links = [];
   for (const line of String(value || '').split(/\r?\n/)) {
     // 1行に複数のURLがあれば別々のリンクにし、URL以外の文字列を最初のリンクのタイトルにする
-    const urls = line.match(/https?:\/\/\S+/gi);
-    if (!urls) continue;
-    const title = line.replace(/https?:\/\/\S+/gi, ' ')
-      .replace(/^[\s|:：-]+|[\s|:：-]+$/g, '').replace(/\s+/g, ' ');
-    urls.forEach((raw, index) => {
+    const raws = line.match(LINK_URL_TOKEN_RE) || [];
+    let rest = line.replace(LINK_URL_TOKEN_RE, ' ');
+    const pathMatch = LINK_WINDOWS_PATH_TAIL_RE.exec(rest);
+    if (pathMatch) {
+      raws.push(pathMatch[2]);
+      rest = rest.slice(0, pathMatch.index);
+    }
+    if (!raws.length) continue;
+    const title = rest.replace(/^[\s|:：-]+|[\s|:：-]+$/g, '').replace(/\s+/g, ' ');
+    raws.forEach((raw, index) => {
       const url = safeLinkUrl(raw);
       if (!url || seen.has(url)) return;
       seen.add(url);
@@ -57,24 +67,70 @@ function parseLinks(value) {
   return links;
 }
 
-// http/httpsのURLだけを正規化して返す。それ以外はnull(store.jsのsanitizeLinksと同じ規則)
+// 資料リンクのURLを正規化して返す。使えないものはnull(store.jsのsafeLinkUrlと同じ規則・同じ結果にすること)。
+// http/httpsはそのまま、Windowsの絶対パスとfile:のURLはfile:///D:/a/b.mp4の形(url.pathToFileURL相当。ドライブ名は大文字。[ ] ~ はエンコードしない)にそろえる
 function safeLinkUrl(value) {
+  const text = String(value ?? '').trim();
+  if (!text || /[\u0000-\u001f\u007f]/.test(text)) return null;
+  if (/^[A-Za-z]:[\\/]/.test(text)) return localPathToFileUrl(text.replace(/\\/g, '/'));
+  let url;
   try {
-    const url = new URL(String(value).trim());
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  // ホスト付き(UNC)・クエリ・フラグメント付き・区切り文字をエンコードしたものは受け付けない
+  if (url.protocol !== 'file:' || url.host || url.search || url.hash || /%2f|%5c/i.test(url.pathname)) return null;
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+  if (/[\u0000-\u001f\u007f]/.test(pathname)) return null;
+  return localPathToFileUrl(/^\/[A-Za-z]:\//.test(pathname) ? pathname.slice(1) : pathname);
+}
+
+// 区切りが/のローカルパス(D:/a/b.mp4 または /home/a.mp4)をfile URLにする。
+// ブラウザのURLはドライブ名を大文字にするがNodeはしないので、ここで大文字にそろえる
+function localPathToFileUrl(slashPath) {
+  const escaped = slashPath.replace(/^\/+/, '').replace(/^[a-z](?=:)/, (drive) => drive.toUpperCase()).replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F');
+  try {
+    const url = new URL(`file:///${escaped}`);
+    return url.host || url.search || url.hash ? null : url.href;
   } catch {
     return null;
   }
 }
 
-// 編集フォームに戻すときの文字列(parseLinksの逆)
-function linksToText(links) {
-  return (links || []).map((link) => (link.title ? `${link.title} ${link.url}` : link.url)).join('\n');
+function isFileLinkUrl(url) {
+  return typeof url === 'string' && /^file:/i.test(url);
 }
 
-// リンクの表示名。タイトルが無ければホスト名
+// file URLを人が読めるパスにする(Windowsのドライブ付きならD:\a\b.mp4)。読めなければそのまま返す
+function fileUrlToDisplayPath(fileUrl) {
+  try {
+    const pathname = decodeURIComponent(new URL(fileUrl).pathname);
+    return /^\/[A-Za-z]:\//.test(pathname) ? pathname.slice(1).replace(/\//g, '\\') : pathname;
+  } catch {
+    return fileUrl;
+  }
+}
+
+// 編集フォームに戻すときの文字列(parseLinksの逆)。Windowsのファイルは読めるパスで出す
+function linksToText(links) {
+  return (links || []).map((link) => {
+    const display = isFileLinkUrl(link.url) ? fileUrlToDisplayPath(link.url) : link.url;
+    const shown = /^[A-Za-z]:\\/.test(display) ? display : link.url;
+    return link.title ? `${link.title} ${shown}` : shown;
+  }).join('\n');
+}
+
+// リンクの表示名。タイトルが無ければホスト名(ファイルならファイル名)
 function linkLabel(link) {
   if (link.title) return link.title;
+  if (isFileLinkUrl(link.url)) return fileUrlToDisplayPath(link.url).split(/[\\/]/).pop() || link.url;
   try {
     return new URL(link.url).host;
   } catch {

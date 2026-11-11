@@ -64,7 +64,7 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 
 信頼境界は「ポートに到達できる者すべて」。
 
-- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`、`POST /api/inbox/done`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
+- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`、`POST /api/inbox/done`、`POST /api/open-local`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
 - データファイルへの書き込みは必ず`store.js`の`writeData()`(内部で`sanitizeData()`を通す)を使う。`color`・`estimateMinutes`などクライアントが`esc()`なしでHTML属性に埋め込む値はここで形式を強制している。HTML属性に描画する列挙型の項目を追加するときは、サーバー側で検証するか描画時に`esc()`する
 - 静的ファイルは`/`・`/index.html`と、`/js/`・`/css/`直下の英小文字・数字・ハイフン名のファイルだけを配信する(`staticRouteFor()`)
 

@@ -113,7 +113,7 @@ test('daily backups retain original data and sanitize today/search fields', () =
 });
 
 function loadServerModule(dir) {
-  const context = vm.createContext({ require, console, Buffer, __dirname:root, process:{env:{DATA_DIR:dir}} });
+  const context = vm.createContext({ require, console, Buffer, URL, __dirname:root, process:{env:{DATA_DIR:dir}} });
   const source = fs.readFileSync(path.join(root, 'server.js'), 'utf8').replace(/server\.listen\(PORT, HOST,[\s\S]*$/, '');
   vm.runInContext(source, context);
   return { context, run: (code) => vm.runInContext(code, context) };
@@ -609,4 +609,147 @@ test('sanitizeData keeps only http(s) links with normalized titles', () => {
     { url: 'http://b.example.com/a%22b', title: null },
   ]);
   assert.deepEqual(sanitizeData({ tasks: [{ id: 'b' }] }).tasks[0].links, []);
+});
+
+const LOCAL_LINK_SAMPLES = [
+  'D:\\YouTube\\zundamon-video\\kaihen\\talk-intro\\talk-intro.mp4',
+  'D:/a b/日本語 #1?&+,=%.mp4',
+  'd:\\x\\..\\y.png',
+  'file:///D:/a%20b/c.mp4',
+  'file:///D:/a b/日本.mp4',
+  'file://localhost/D:/a.mp4',
+  'https://example.com/a b',
+];
+
+test('sanitizeData accepts Windows paths and file URLs as normalized file URLs and rejects the rest', () => {
+  const { sanitizeData, safeLinkUrl } = require(path.join(root, 'store.js'));
+  const { pathToFileURL } = require('node:url');
+  const task = sanitizeData({ tasks: [{ id: 'a', links: [
+    { url: 'D:\\YouTube\\zundamon-video\\kaihen\\talk-intro\\talk-intro.mp4', title: '動画' },
+    { url: 'D:/YouTube/zundamon-video/kaihen/talk-intro/talk-intro.mp4', title: '重複' },
+    { url: 'file:///D:/%E5%8B%95%E7%94%BB/a%20b.mp4' },
+    { url: 'file://server/share/a.mp4' },
+    { url: 'file:///D:/a%2Fb.mp4' },
+    { url: 'file:///D:/a.mp4#x' },
+    { url: 'D:relative.mp4' },
+    { url: 'javascript:alert(1)' },
+    { url: 'D:\\a\u0000b.mp4' },
+    { url: 'e:\\小文字\\x.mp4' },
+    { url: 'file:///e:/%E5%B0%8F%E6%96%87%E5%AD%97/x.mp4' },
+  ] }] }).tasks[0];
+  // ドライブ名はブラウザのURLと同じく大文字にそろえる
+  assert.deepEqual(task.links, [
+    { url: 'file:///D:/YouTube/zundamon-video/kaihen/talk-intro/talk-intro.mp4', title: '動画' },
+    { url: 'file:///D:/%E5%8B%95%E7%94%BB/a%20b.mp4', title: null },
+    { url: 'file:///E:/%E5%B0%8F%E6%96%87%E5%AD%97/x.mp4', title: null },
+  ]);
+  // 空白・日本語・#・?・%などはurl.pathToFileURLと同じ形になる([ ] ^ ~ はNodeだけがエンコードするので対象外)
+  for (const sample of ['D:\\a b\\日本語 #1?&+,=%.mp4', 'D:\\YouTube\\talk-intro.mp4', 'C:\\Users\\x\\(1){3}.png']) {
+    assert.equal(safeLinkUrl(sample), pathToFileURL(sample, { windows: true }).href, sample);
+  }
+  const { run } = client();
+  for (const sample of LOCAL_LINK_SAMPLES) {
+    const once = safeLinkUrl(sample);
+    assert.equal(safeLinkUrl(once), once, sample);
+    // 画面(js/domain.js)とサーバー(store.js)で結果が一致する
+    assert.equal(run(`safeLinkUrl(${JSON.stringify(sample)})`), once, sample);
+  }
+});
+
+test('local file links: parsed from the form, shown as Windows paths, opened through the server', async () => {
+  const { context, listeners, run } = client();
+  const links = run(`parseLinks(${JSON.stringify('イントロ D:\\YouTube\\talk intro\\talk-intro.mp4\nD:/動画/a.mp4 https://example.com/x\n"E:\\引用 符\\b.srt"')})`);
+  assert.deepEqual(JSON.parse(JSON.stringify(links)), [
+    { url: 'file:///D:/YouTube/talk%20intro/talk-intro.mp4', title: 'イントロ' },
+    { url: 'https://example.com/x', title: null },
+    { url: 'file:///D:/%E5%8B%95%E7%94%BB/a.mp4', title: null },
+    { url: 'file:///E:/%E5%BC%95%E7%94%A8%20%E7%AC%A6/b.srt', title: null },
+  ]);
+  run(`data.tasks = [{id:'t', title:'T', status:'todo', links:${JSON.stringify(links)}}];`);
+  const text = run('linksToText(data.tasks[0].links)');
+  assert.ok(text.startsWith('イントロ D:\\YouTube\\talk intro\\talk-intro.mp4\n'));
+  assert.deepEqual(JSON.parse(JSON.stringify(run(`parseLinks(${JSON.stringify(text)})`))), JSON.parse(JSON.stringify(links)));
+  const html = run('renderTodo()');
+  assert.ok(html.includes('href="file:///D:/YouTube/talk%20intro/talk-intro.mp4" data-action="open-local-file" title="D:\\YouTube\\talk intro\\talk-intro.mp4">🔗 イントロ</a>'));
+  assert.ok(html.includes('title="D:\\動画\\a.mp4">🔗 a.mp4</a>'));
+  assert.ok(html.includes('href="https://example.com/x" target="_blank" rel="noopener noreferrer"'));
+
+  const requests = [];
+  context.fetch = async (url, options) => { requests.push({ url, options }); return { ok: true }; };
+  let prevented = false;
+  const element = { dataset: { action: 'open-local-file' }, getAttribute: (name) => (name === 'href' ? links[0].url : null) };
+  listeners.click({ target: { closest: () => element }, preventDefault: () => { prevented = true; } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(prevented);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/open-local');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(requests[0].options.headers['X-Requested-With'], 'enchanter');
+  assert.deepEqual(JSON.parse(requests[0].options.body), { url: links[0].url });
+
+  const alerts = [];
+  context.alert = (message) => alerts.push(message);
+  context.fetch = async () => ({ ok: false, json: async () => ({ error: 'この種類のファイルは開けません: a.exe' }) });
+  listeners.click({ target: { closest: () => element }, preventDefault() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(alerts, ['この種類のファイルは開けません: a.exe']);
+});
+
+test('POST /api/open-local opens only registered files with allowed extensions that exist', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-test-'));
+  const { pathToFileURL } = require('node:url');
+  const { run } = loadServerModule(dir);
+  const server = run('server');
+  try {
+    const video = path.join(dir, '動画 1.mp4');
+    const program = path.join(dir, 'tool.exe');
+    const folder = path.join(dir, 'folder.mp4');
+    fs.writeFileSync(video, '');
+    fs.writeFileSync(program, '');
+    fs.mkdirSync(folder);
+    const unregistered = path.join(dir, 'other.mp4');
+    fs.writeFileSync(unregistered, '');
+    const linkOf = (file) => ({ url: pathToFileURL(file).href });
+    run(`writeData(${JSON.stringify({ tasks: [{ id: 't', links: [linkOf(video), linkOf(program), linkOf(folder), linkOf(path.join(dir, 'missing.mp4'))] }] })})`);
+    const stored = JSON.parse(fs.readFileSync(path.join(dir, 'enchanter-data.json'), 'utf8')).tasks[0].links.map((link) => link.url);
+    assert.equal(stored.length, 4);
+    run('globalThis.opened = []; openWithDefaultApp = (file) => opened.push(file);');
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const headers = { 'X-Requested-With': 'enchanter', 'Content-Type': 'application/json' };
+    const open = (url, extra = {}) => httpRequest(port, { method: 'POST', path: '/api/open-local', headers: { ...headers, ...extra }, body: JSON.stringify({ url }) });
+
+    assert.equal((await httpRequest(port, { method: 'POST', path: '/api/open-local', body: JSON.stringify({ url: stored[0] }) })).status, 400);
+    assert.equal((await httpRequest(port, { method: 'GET', path: '/api/open-local' })).status, 405);
+    assert.equal((await open(pathToFileURL(unregistered).href)).status, 403);
+    assert.equal((await open('https://example.com/')).status, 400);
+    assert.equal((await open(stored[1])).status, 403);
+    assert.equal((await open(stored[2])).status, 404);
+    assert.equal((await open(stored[3])).status, 404);
+    // 上限を超えた本文は413を返して接続を切る(応答より先に切断が届くこともある)
+    const oversized = await new Promise((resolve) => {
+      const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/api/open-local', headers, agent: false }, (res) => {
+        res.on('error', () => {});
+        res.resume();
+        resolve(res.statusCode);
+      });
+      req.on('error', (error) => resolve(error.code));
+      req.end('x'.repeat(run('MAX_OPEN_LOCAL_BODY') + 1));
+    });
+    assert.ok(oversized === 413 || oversized === 'ECONNRESET' || oversized === 'EPIPE', String(oversized));
+    assert.deepEqual(JSON.parse(JSON.stringify(run('opened'))), []);
+
+    assert.equal((await open(stored[0])).status, 204);
+    assert.deepEqual(JSON.parse(JSON.stringify(run('opened'))), [fs.realpathSync(video)]);
+    // 表記の違うURL(エンコードなし・ドライブ名が小文字)でも、正規化して登録済みのリンクと照合する
+    const otherSpelling = decodeURI(stored[0]).replace(/^file:\/\/\/([A-Z]):/, (_, drive) => `file:///${drive.toLowerCase()}:`);
+    assert.notEqual(otherSpelling, stored[0]);
+    assert.equal((await open(otherSpelling)).status, 204);
+    assert.equal(run('opened.length'), 2);
+    assert.equal(run("isOpenableLocalFile('C:\\\\a.exe:x.mp4')"), false);
+    assert.equal(run("isOpenableLocalFile('C:\\\\a\\\\b.MP4')"), true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

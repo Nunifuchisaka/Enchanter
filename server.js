@@ -10,8 +10,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
+const { fileURLToPath } = require('url');
 // テストはvm上でこのファイルを実行するため、相対パスではなく__dirname基準で読み込む
-const { createStore, sanitizeData, readJsonSafe, writeJsonAtomic } = require(path.join(__dirname, 'store.js'));
+const { createStore, sanitizeData, safeLinkUrl, readJsonSafe, writeJsonAtomic } = require(path.join(__dirname, 'store.js'));
 
 // ---- 設定 ----
 const PORT = Number(process.env.PORT) || 8787;
@@ -93,14 +95,14 @@ function requireCsrfHeader(req, res) {
 }
 
 // リクエストボディを文字列として読み切ってから onEnd に渡す。
-// MAX_BODY を超えた場合は413を返して接続を切り、onEnd は呼ばない。
-function readBody(req, res, onEnd) {
+// limit(既定 MAX_BODY)を超えた場合は413を返して接続を切り、onEnd は呼ばない。
+function readBody(req, res, onEnd, limit = MAX_BODY) {
   const chunks = [];
   let size = 0;
   let aborted = false;
   req.on('data', (chunk) => {
     size += chunk.length;
-    if (size > MAX_BODY) {
+    if (size > limit) {
       aborted = true;
       sendJson(res, 413, { error: 'データが大きすぎます' });
       req.destroy();
@@ -421,6 +423,86 @@ function handleInboxDoneRequest(req, res) {
   });
 }
 
+// ---- 資料リンクのローカルファイルを開く ----
+
+// 本文は{ url }だけなので小さく制限する
+const MAX_OPEN_LOCAL_BODY = 16 * 1024;
+// 既定のアプリで開いてよいのは動画・音声・画像・文書だけ。実行できる形式(exe・bat・lnk・html等)は開かない
+const OPEN_LOCAL_EXTENSIONS = new Set(['mp4', 'mov', 'mkv', 'webm', 'm4v', 'avi', 'wav', 'mp3', 'm4a', 'flac', 'ogg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'txt', 'srt', 'md']);
+
+function isOpenableLocalFile(filePath) {
+  // Windowsの代替データストリーム(a.exe:x.mp4)で拡張子の確認をすり抜けないよう、ドライブ以降の「:」を拒否する
+  if (filePath.replace(/^[A-Za-z]:/, '').includes(':')) return false;
+  return OPEN_LOCAL_EXTENSIONS.has(path.extname(filePath).slice(1).toLowerCase());
+}
+
+function isRegisteredLocalLink(url) {
+  return store.readData().tasks.some((task) => (task.links || []).some((link) => link.url === url));
+}
+
+// OSの既定のアプリで開く。シェルを通さず引数で渡す(テストでは差し替える)。
+// explorer.exeは成功しても終了コード1を返すので、終了コードは見ない
+let openWithDefaultApp = (filePath) => {
+  const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const child = spawn(command, [filePath], { detached: true, stdio: 'ignore' });
+  child.on('error', (error) => console.error('ファイルを開くアプリを起動できませんでした', error));
+  child.unref();
+};
+
+function handleOpenLocalRequest(req, res) {
+  readBody(req, res, (body) => {
+    // readBodyのコールバックは非同期なので、ここで投げた例外を捕まえないとプロセスが落ちる
+    try {
+      let payload;
+      try {
+        payload = parseJsonObject(body);
+      } catch {
+        sendJson(res, 400, { error: '不正なJSONです' });
+        return;
+      }
+      // 画面側(ブラウザのURL)で正規化し直したURLが届くので、保存時と同じ規則でそろえてから照合する
+      const url = typeof payload.url === 'string' ? safeLinkUrl(payload.url) : null;
+      if (!url || !/^file:/i.test(url)) {
+        sendJson(res, 400, { error: 'ローカルファイルのURLではありません' });
+        return;
+      }
+      // 画面に表示しているリンク以外(任意のパス)は開かない
+      if (!isRegisteredLocalLink(url)) {
+        sendJson(res, 403, { error: 'タスクの資料リンクに登録されていないファイルです' });
+        return;
+      }
+      let filePath;
+      try {
+        filePath = fileURLToPath(url);
+      } catch {
+        sendJson(res, 400, { error: 'ローカルファイルのURLとして読めません' });
+        return;
+      }
+      if (!isOpenableLocalFile(filePath)) {
+        sendJson(res, 403, { error: `この種類のファイルは開けません: ${path.basename(filePath)}` });
+        return;
+      }
+      let realPath;
+      try {
+        realPath = fs.realpathSync(filePath);
+        if (!fs.statSync(realPath).isFile()) throw new Error('通常のファイルではありません');
+      } catch {
+        sendJson(res, 404, { error: `ファイルが見つかりません: ${filePath}` });
+        return;
+      }
+      // シンボリックリンクの先が実行ファイルなどでないことも確かめる
+      if (!isOpenableLocalFile(realPath)) {
+        sendJson(res, 403, { error: `この種類のファイルは開けません: ${path.basename(realPath)}` });
+        return;
+      }
+      openWithDefaultApp(realPath);
+      sendNoContent(res);
+    } catch (error) {
+      sendInternalError(res, error);
+    }
+  }, MAX_OPEN_LOCAL_BODY);
+}
+
 // ---- 静的ファイル ----
 
 function serveStatic(res, { file, type }) {
@@ -482,6 +564,11 @@ function routeRequest(req, res) {
 
   if (url.pathname === '/api/inbox/done') {
     if (allowMethod(req, res, 'POST') && requireCsrfHeader(req, res)) handleInboxDoneRequest(req, res);
+    return;
+  }
+
+  if (url.pathname === '/api/open-local') {
+    if (allowMethod(req, res, 'POST') && requireCsrfHeader(req, res)) handleOpenLocalRequest(req, res);
     return;
   }
 
