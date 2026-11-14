@@ -198,10 +198,10 @@ function sanitizeFilters(filters) {
     }));
 }
 
-// Todoタブの分類エリアの配置(2列×分類キー)。既知のキーだけを1回ずつ残し、形が違えばnull(既定の配置)にする
+// Todoタブの分類エリアの配置(1〜2列×分類キー)。既知のキーだけを1回ずつ残し、形が違えばnull(既定の配置)にする
 const TODO_GROUP_KEYS = new Set(['today', 'limited', 'upcoming', 'recurring']);
 function sanitizeTodoLayout(layout) {
-  if (!Array.isArray(layout) || layout.length !== 2) return null;
+  if (!Array.isArray(layout) || layout.length < 1 || layout.length > 2) return null;
   const seen = new Set();
   const columns = layout.map((column) => (Array.isArray(column) ? column : []).filter((key) => {
     if (!TODO_GROUP_KEYS.has(key) || seen.has(key)) return false;

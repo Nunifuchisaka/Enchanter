@@ -94,6 +94,33 @@ test('normalizeTodoLayout and sanitizeData repair broken layouts', () => {
   assert.equal(sanitizeData({}).todoLayout, null);
 });
 
+test('todo groups can switch between one and two columns', () => {
+  const { run, listeners } = client();
+  const click = (columns) => listeners.click({ target: { closest: () => ({ dataset: { action: 'set-todo-columns', columns } }) } });
+  assert.ok(run('renderTodo()').includes('data-columns="2" aria-pressed="true"'));
+
+  run("moveTodoGroup('recurring', 0, 'limited')");
+  click('1');
+  assert.equal(run('JSON.stringify(data.todoLayout)'), JSON.stringify([['today', 'recurring', 'limited', 'upcoming']]));
+  const html = run('renderTodo()');
+  assert.ok(html.includes('todo-columns todo-columns-1'));
+  assert.ok(html.includes('data-columns="1" aria-pressed="true"'));
+  assert.ok(!html.includes('data-layout-column="1"'));
+  // 1列でも並べ替えられ、Alt+→相当の移動(存在しない列)は無視される
+  assert.equal(run("moveTodoGroup('upcoming', 0, 'today')"), true);
+  assert.equal(run("moveTodoGroup('today', 1, null)"), false);
+
+  click('2');
+  assert.equal(run('JSON.stringify(data.todoLayout)'), JSON.stringify([['upcoming', 'today'], ['recurring', 'limited']]));
+  click('3');
+  assert.equal(run('data.todoLayout.length'), 2);
+
+  // 1列の配置で欠けたキーは唯一の列に足し、保存時も1列のまま残す
+  assert.equal(run("JSON.stringify(normalizeTodoLayout([['recurring']]))"), JSON.stringify([['recurring', 'today', 'limited', 'upcoming']]));
+  const { sanitizeData } = require(path.join(root, 'store.js'));
+  assert.deepEqual(sanitizeData({ todoLayout: [['today', 'limited']] }).todoLayout, [['today', 'limited']]);
+});
+
 test('undo restores task and entries without reverting unrelated edits', () => {
   const { run } = client();
   run(`data.tasks = [{id:'a', title:'A'}, {id:'b', title:'B'}];

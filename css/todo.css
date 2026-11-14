@@ -299,9 +299,40 @@
   text-align: right;
 }
 
+.todo-columns.todo-columns-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.task-card-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.todo-column-switch {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.todo-column-switch .btn {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.todo-column-switch .btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+}
+
 @media (max-width: 900px) {
   .todo-columns {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 狭い画面は常に1列で表示するので、列数の切り替えは出さない */
+  .todo-column-switch {
+    display: none;
   }
 }
 

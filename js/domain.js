@@ -230,12 +230,15 @@ function createNextOccurrence(task) {
   };
 }
 
-// Todoの分類エリアの配置を2列に整える。未知・重複のキーは捨て、欠けたキーは既定の列の末尾に足す
+// Todoの分類エリアの配置を整える。列数は保存された配置の列数(1〜TODO_MAX_COLUMNS、それ以外は2列)。
+// 未知・重複のキーは捨て、欠けたキーは既定の列(1列なら唯一の列)の末尾に足す
 function normalizeTodoLayout(layout) {
-  const columns = DEFAULT_TODO_LAYOUT.map(() => []);
+  const count = Array.isArray(layout) && layout.length >= 1 && layout.length <= TODO_MAX_COLUMNS
+    ? layout.length : DEFAULT_TODO_LAYOUT.length;
+  const columns = Array.from({ length: count }, () => []);
   const seen = new Set();
   if (Array.isArray(layout)) {
-    layout.slice(0, columns.length).forEach((column, index) => {
+    layout.slice(0, count).forEach((column, index) => {
       if (!Array.isArray(column)) return;
       column.forEach((key) => {
         if (TODO_GROUP_KEYS.includes(key) && !seen.has(key)) {
@@ -247,10 +250,18 @@ function normalizeTodoLayout(layout) {
   }
   DEFAULT_TODO_LAYOUT.forEach((column, index) => {
     column.forEach((key) => {
-      if (!seen.has(key)) columns[index].push(key);
+      if (!seen.has(key)) columns[Math.min(index, count - 1)].push(key);
     });
   });
   return columns;
+}
+
+// 列数を変える。1列にするときは左の列の下に右の列を続け、2列にするときは上から半分(端数は左)を左の列にする
+function relayoutTodoColumns(layout, count) {
+  const keys = normalizeTodoLayout(layout).flat();
+  if (count === 1) return [keys];
+  const half = Math.ceil(keys.length / 2);
+  return [keys.slice(0, half), keys.slice(half)];
 }
 
 function isDefaultTodoLayout(layout) {

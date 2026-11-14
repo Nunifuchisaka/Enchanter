@@ -82,6 +82,14 @@ function moveTodoGroup(key, columnIndex, beforeKey) {
   return true;
 }
 
+// 分類エリアの列数(1か2)を変える。変わったらtrue
+function setTodoColumnCount(count) {
+  if (count !== 1 && count !== 2) return false;
+  if (normalizeTodoLayout(data.todoLayout).length === count) return false;
+  data.todoLayout = relayoutTodoColumns(data.todoLayout, count);
+  return true;
+}
+
 // カンバンで複数タスクの並び順を変える。ドロップ先の前後にあるタスクのIDで位置を決める
 function reorderKanbanTask(task, status, beforeId, afterId) {
   const tasks = data.tasks.filter((item) => item.status === status && item.id !== task.id).sort(compareKanbanTasks);
