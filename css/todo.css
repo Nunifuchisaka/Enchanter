@@ -211,6 +211,94 @@
   flex-wrap: wrap;
 }
 
+/* ---------- 分類エリアの配置変更(ドラッグ) ---------- */
+
+.task-group-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.group-drag-handle {
+  flex: none;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-sub);
+  font-size: 18px;
+  line-height: 1.2;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.group-drag-handle:hover,
+.group-drag-handle:focus-visible {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.task-group.dragging {
+  position: relative;
+  z-index: 20;
+  opacity: 0.85;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+}
+
+.task-group.dragging .group-drag-handle {
+  cursor: grabbing;
+}
+
+.todo-columns-dragging {
+  /* 短い列の下の余白にも落とせるよう、ドラッグ中は列の高さを揃える */
+  align-items: stretch;
+}
+
+.todo-columns-dragging .todo-column {
+  min-height: 120px;
+  border-radius: var(--radius-sm);
+  outline: 2px dashed transparent;
+  outline-offset: 6px;
+}
+
+.todo-columns-dragging .todo-column.drop-target {
+  outline-color: var(--accent);
+}
+
+.todo-group-insert-before {
+  box-shadow: 0 -4px 0 -1px var(--accent);
+}
+
+.todo-column-insert-end::after {
+  content: '';
+  display: block;
+  height: 3px;
+  margin-top: 12px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.todo-column-empty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.todo-column-hint {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.todo-layout-reset {
+  margin-top: 12px;
+  text-align: right;
+}
+
 @media (max-width: 900px) {
   .todo-columns {
     grid-template-columns: minmax(0, 1fr);

@@ -229,3 +229,31 @@ function createNextOccurrence(task) {
     links: (task.links || []).map((link) => ({ ...link })),
   };
 }
+
+// Todoの分類エリアの配置を2列に整える。未知・重複のキーは捨て、欠けたキーは既定の列の末尾に足す
+function normalizeTodoLayout(layout) {
+  const columns = DEFAULT_TODO_LAYOUT.map(() => []);
+  const seen = new Set();
+  if (Array.isArray(layout)) {
+    layout.slice(0, columns.length).forEach((column, index) => {
+      if (!Array.isArray(column)) return;
+      column.forEach((key) => {
+        if (TODO_GROUP_KEYS.includes(key) && !seen.has(key)) {
+          seen.add(key);
+          columns[index].push(key);
+        }
+      });
+    });
+  }
+  DEFAULT_TODO_LAYOUT.forEach((column, index) => {
+    column.forEach((key) => {
+      if (!seen.has(key)) columns[index].push(key);
+    });
+  });
+  return columns;
+}
+
+function isDefaultTodoLayout(layout) {
+  return JSON.stringify(normalizeTodoLayout(layout)) === JSON.stringify(DEFAULT_TODO_LAYOUT);
+}
+

@@ -148,8 +148,10 @@ function todoTaskGroup(group, now) {
   };
   const rowsOf = (tasks) => tasks.map((task) => todoTaskRow(task, now)).join('');
   return `
-    <section class="task-group task-group-${group.key}">
+    <section class="task-group task-group-${group.key}" data-group-key="${group.key}">
       <div class="task-group-heading">
+        <span class="group-drag-handle" data-action-pointer="todo-group-drag" data-key="${group.key}"
+          tabindex="0" role="button" title="ドラッグで配置を変更(Alt+矢印キーでも移動)" aria-label="${group.title}の配置を変更">⠿</span>
         <div>
           <h3>${group.title} <span class="section-count">${group.tasks.length}</span></h3>
           <p>${group.description}</p>
@@ -271,6 +273,9 @@ function renderTodo() {
     tasks: remainingTasks.filter((task) => task.repeat),
   };
 
+  const groups = { today: todayGroup, limited: limitedGroup, upcoming: upcomingGroup, recurring: recurringGroup };
+  const layout = normalizeTodoLayout(data.todoLayout);
+
   return `
     ${todoCreateCard()}
     <div class="card task-card">
@@ -283,15 +288,13 @@ function renderTodo() {
       </div>
       ${todoFilterRow()}
       <div class="todo-columns">
-        <div class="todo-column">
-          ${todoTaskGroup(todayGroup, now)}
-          ${todoTaskGroup(limitedGroup, now)}
-        </div>
-        <div class="todo-column">
-          ${todoTaskGroup(upcomingGroup, now)}
-          ${todoTaskGroup(recurringGroup, now)}
-        </div>
+        ${layout.map((keys, index) => `
+          <div class="todo-column${keys.length ? '' : ' todo-column-empty'}" data-layout-column="${index}">
+            ${keys.map((key) => todoTaskGroup(groups[key], now)).join('')}
+            ${keys.length ? '' : '<p class="todo-column-hint">分類エリアをここへドラッグできます</p>'}
+          </div>`).join('')}
       </div>
+      ${isDefaultTodoLayout(data.todoLayout) ? '' : '<div class="todo-layout-reset"><button class="btn btn-quiet" type="button" data-action="reset-todo-layout">分類エリアの配置を元に戻す</button></div>'}
       ${done.length ? `
         <details class="done-section" data-details-key="done-tasks"${ui.todoSearch ? ' open' : ''}>
           <summary><span class="status-dot status-done"></span>完了済み <span class="section-count">${done.length}</span></summary>
