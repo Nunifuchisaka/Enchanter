@@ -50,8 +50,48 @@ test('search includes completed tasks, notes and normalized tags; today appears 
   run("ui.todoSearch = '';");
   const html = run('renderTodo()');
   assert.equal((html.match(/title="タスク名を変更" aria-label="Today task/g) || []).length, 1);
-  assert.ok(html.indexOf('Today task') < html.indexOf('todo-column">', html.indexOf('Today task')));
+  assert.ok(html.indexOf('Today task') < html.indexOf('data-layout-column="1"'));
   assert.ok(html.includes('Future task'));
+});
+
+test('todo group layout can be rearranged by key, saved and reset', () => {
+  const { run, listeners } = client();
+  const order = (html) => [...html.matchAll(/data-group-key="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(order(run('renderTodo()')), ['today', 'limited', 'upcoming', 'recurring']);
+  assert.ok(!run('renderTodo()').includes('reset-todo-layout'));
+
+  // 同じ列の中で前へ、別の列の末尾へ、別の列の先頭へ
+  assert.equal(run("moveTodoGroup('limited', 0, 'today')"), true);
+  assert.equal(run("moveTodoGroup('today', 1, null)"), true);
+  assert.equal(run("moveTodoGroup('recurring', 0, 'limited')"), true);
+  assert.equal(run('JSON.stringify(data.todoLayout)'), JSON.stringify([['recurring', 'limited'], ['upcoming', 'today']]));
+  // 位置が変わらない移動は保存しない
+  assert.equal(run("moveTodoGroup('today', 1, null)"), false);
+  assert.equal(run("moveTodoGroup('nope', 0, null)"), false);
+
+  // 片方の列を空にすると、ドロップ先の案内を出す
+  run("moveTodoGroup('upcoming', 0, null); moveTodoGroup('today', 0, null);");
+  const html = run('renderTodo()');
+  assert.deepEqual(order(html), ['recurring', 'limited', 'upcoming', 'today']);
+  assert.ok(html.includes('todo-column todo-column-empty" data-layout-column="1"'));
+  assert.ok(html.includes('reset-todo-layout'));
+
+  const element = { dataset: { action: 'reset-todo-layout' } };
+  listeners.click({ target: { closest: () => element } });
+  assert.equal(run('data.todoLayout'), null);
+  assert.deepEqual(order(run('renderTodo()')), ['today', 'limited', 'upcoming', 'recurring']);
+});
+
+test('normalizeTodoLayout and sanitizeData repair broken layouts', () => {
+  const { run } = client();
+  assert.equal(run("JSON.stringify(normalizeTodoLayout([['recurring', 'bogus', 'recurring'], 'x', ['today']]))"),
+    JSON.stringify([['recurring', 'today', 'limited'], ['upcoming']]));
+  assert.equal(run('JSON.stringify(normalizeTodoLayout(null))'), JSON.stringify([['today', 'limited'], ['upcoming', 'recurring']]));
+  const { sanitizeData } = require(path.join(root, 'store.js'));
+  assert.deepEqual(sanitizeData({ todoLayout: [['upcoming', 'evil"<'], ['today', 'upcoming']] }).todoLayout, [['upcoming'], ['today']]);
+  assert.equal(sanitizeData({ todoLayout: 'x' }).todoLayout, null);
+  assert.equal(sanitizeData({ todoLayout: [[], [], []] }).todoLayout, null);
+  assert.equal(sanitizeData({}).todoLayout, null);
 });
 
 test('undo restores task and entries without reverting unrelated edits', () => {

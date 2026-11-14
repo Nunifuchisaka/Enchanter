@@ -11,6 +11,48 @@ function clearInsertMarkers() {
   });
 }
 
+// Todoの分類エリアのドラッグ中に付けた挿入位置の目印を外す
+function clearTodoGroupMarkers() {
+  document.querySelectorAll('.todo-group-insert-before, .todo-column-insert-end, .todo-column.drop-target').forEach((element) => {
+    element.classList.remove('todo-group-insert-before', 'todo-column-insert-end', 'drop-target');
+  });
+}
+
+// ポインター位置の列と、その列で直前に入れる分類エリアを求める(nullなら列の末尾)
+// 列の外(列の間の隙間や、短い列の下の余白)で離しても、最も近い列に入れる
+function todoGroupDropPosition(clientX, clientY, draggedKey) {
+  const area = document.querySelector('.todo-columns');
+  if (!area) return null;
+  const areaRect = area.getBoundingClientRect();
+  if (clientY < areaRect.top - 80 || clientY > areaRect.bottom + 200 ||
+    clientX < areaRect.left - 80 || clientX > areaRect.right + 80) return null;
+  const distanceTo = (rect) => Math.hypot(
+    Math.max(rect.left - clientX, 0, clientX - rect.right),
+    Math.max(rect.top - clientY, 0, clientY - rect.bottom),
+  );
+  const column = [...area.querySelectorAll('.todo-column')].reduce((best, item) => {
+    const distance = distanceTo(item.getBoundingClientRect());
+    return !best || distance < best.distance ? { item, distance } : best;
+  }, null)?.item || null;
+  if (!column) return null;
+  const before = [...column.querySelectorAll(':scope > .task-group')]
+    .filter((group) => group.dataset.groupKey !== draggedKey)
+    .find((group) => {
+      const rect = group.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    }) || null;
+  return { column, before };
+}
+
+// 分類エリアを動かして保存し、操作したつまみにフォーカスを戻す
+function commitTodoGroupMove(key, columnIndex, beforeKey) {
+  if (!moveTodoGroup(key, columnIndex, beforeKey)) return;
+  save();
+  renderAll();
+  const handle = document.querySelector(`.group-drag-handle[data-key="${key}"]`);
+  if (handle) handle.focus({ preventScroll: true });
+}
+
 document.addEventListener('click', (event) => {
   const element = event.target.closest('[data-action]');
   // 削除の確認状態は、そのゴミ箱以外のどこかをクリックしたら解除する
@@ -36,6 +78,10 @@ document.addEventListener('click', (event) => {
     case 'tab':
       ui.tab = element.dataset.tab;
       clearEditing();
+      break;
+    case 'reset-todo-layout':
+      data.todoLayout = null;
+      save();
       break;
     case 'clear-todo-filters':
       ui.todoSearch = '';
@@ -481,6 +527,22 @@ document.addEventListener('submit', (event) => {
 document.addEventListener('pointerdown', (event) => {
   const element = event.target.closest('[data-action-pointer]');
   if (!element || event.button !== 0) return;
+  if (element.dataset.actionPointer === 'todo-group-drag') {
+    const group = element.closest('.task-group');
+    if (!group) return;
+    event.preventDefault();
+    todoGroupDrag = {
+      element: group,
+      handle: element,
+      pointerId: event.pointerId,
+      key: element.dataset.key,
+      startX: event.clientX,
+      startY: event.clientY,
+      started: false,
+    };
+    element.setPointerCapture(event.pointerId);
+    return;
+  }
   if (element.dataset.actionPointer === 'kanban-drag') {
     // ボタンや入力欄から始まった操作はドラッグにしない
     if (event.target.closest('button, a, input, select, textarea')) return;
@@ -521,6 +583,26 @@ document.addEventListener('pointerdown', (event) => {
 });
 
 document.addEventListener('pointermove', (event) => {
+  if (todoGroupDrag && event.pointerId === todoGroupDrag.pointerId) {
+    const dx = event.clientX - todoGroupDrag.startX;
+    const dy = event.clientY - todoGroupDrag.startY;
+    if (!todoGroupDrag.started && Math.hypot(dx, dy) > 4) {
+      todoGroupDrag.started = true;
+      todoGroupDrag.element.classList.add('dragging');
+      document.querySelector('.todo-columns')?.classList.add('todo-columns-dragging');
+    }
+    if (todoGroupDrag.started) {
+      todoGroupDrag.element.style.transform = `translate(${dx}px, ${dy}px)`;
+      clearTodoGroupMarkers();
+      const position = todoGroupDropPosition(event.clientX, event.clientY, todoGroupDrag.key);
+      if (position) {
+        position.column.classList.add('drop-target');
+        if (position.before) position.before.classList.add('todo-group-insert-before');
+        else position.column.classList.add('todo-column-insert-end');
+      }
+    }
+    return;
+  }
   if (kanbanDrag && event.pointerId === kanbanDrag.pointerId) {
     const dx = event.clientX - kanbanDrag.startX;
     const dy = event.clientY - kanbanDrag.startY;
@@ -590,6 +672,21 @@ function finishGanttDrag(event, commit) {
   renderAll();
 }
 
+// 分類エリアのドラッグを終える。列の上で離したときだけ配置を保存する
+function finishTodoGroupDrag(event, commit) {
+  if (!todoGroupDrag || event.pointerId !== todoGroupDrag.pointerId) return;
+  const drag = todoGroupDrag;
+  const position = commit && drag.started ? todoGroupDropPosition(event.clientX, event.clientY, drag.key) : null;
+  clearTodoGroupMarkers();
+  todoGroupDrag = null;
+  drag.element.classList.remove('dragging');
+  drag.element.style.transform = '';
+  document.querySelector('.todo-columns')?.classList.remove('todo-columns-dragging');
+  if (drag.handle.hasPointerCapture(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId);
+  if (!position) return;
+  commitTodoGroupMove(drag.key, Number(position.column.dataset.layoutColumn), position.before ? position.before.dataset.groupKey : null);
+}
+
 // カンバンのドラッグを終える。列の上で離したときだけ、ステータスと並び順を更新する
 function finishKanbanDrag(event, commit) {
   if (!kanbanDrag || event.pointerId !== kanbanDrag.pointerId) return;
@@ -612,8 +709,16 @@ function finishKanbanDrag(event, commit) {
   renderAll();
 }
 
-document.addEventListener('pointerup', (event) => { finishKanbanDrag(event, true); finishGanttDrag(event, true); });
-document.addEventListener('pointercancel', (event) => { finishKanbanDrag(event, false); finishGanttDrag(event, false); });
+document.addEventListener('pointerup', (event) => {
+  finishTodoGroupDrag(event, true);
+  finishKanbanDrag(event, true);
+  finishGanttDrag(event, true);
+});
+document.addEventListener('pointercancel', (event) => {
+  finishTodoGroupDrag(event, false);
+  finishKanbanDrag(event, false);
+  finishGanttDrag(event, false);
+});
 
 // 戻る/進むやハッシュの手入力に追従する(renderAll内のreplaceStateでは発火しない)
 window.addEventListener('hashchange', () => {
@@ -635,6 +740,21 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     const input = target.querySelector('input[type="file"]');
     if (input) input.click();
+    return;
+  }
+  // 分類エリアのつまみ: Alt+↑↓で列内の順番、Alt+←→で隣の列へ移動する
+  const groupHandle = target.closest ? target.closest('.group-drag-handle') : null;
+  if (groupHandle && event.altKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    event.preventDefault();
+    const key = groupHandle.dataset.key;
+    const layout = normalizeTodoLayout(data.todoLayout);
+    const columnIndex = layout.findIndex((column) => column.includes(key));
+    const column = layout[columnIndex];
+    const index = column.indexOf(key);
+    if (event.key === 'ArrowUp' && index > 0) commitTodoGroupMove(key, columnIndex, column[index - 1]);
+    if (event.key === 'ArrowDown' && index < column.length - 1) commitTodoGroupMove(key, columnIndex, column[index + 2] || null);
+    const nextColumn = columnIndex + (event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0);
+    if (nextColumn !== columnIndex && layout[nextColumn]) commitTodoGroupMove(key, nextColumn, layout[nextColumn][index] || null);
     return;
   }
   const kanbanCardTarget = target.closest ? target.closest('.kanban-card') : null;

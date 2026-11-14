@@ -6,7 +6,7 @@
 /* ---------- state ---------- */
 
 // 永続化されるデータ(data/enchanter-data.json と同じ形)
-let data = { clients: [], categories: [], projects: [], tasks: [], entries: [], filters: [] };
+let data = { clients: [], categories: [], projects: [], tasks: [], entries: [], filters: [], todoLayout: null };
 
 // 表示状態。永続化しない。タブごとの日付・絞り込みはURLハッシュと相互に反映する
 const ui = {
@@ -37,6 +37,7 @@ const ui = {
 // 進行中のドラッグ操作(ポインターイベントの途中経過)
 let kanbanDrag = null;
 let ganttDrag = null;
+let todoGroupDrag = null;
 // 直前のガントのドラッグ移動。Ctrl+Zで元に戻すために使う
 let lastGanttDragUndo = null;
 // 削除の取り消し履歴(ページを開いている間のみ、最大20件)
@@ -85,6 +86,7 @@ function normalizeData(raw) {
     tasks: raw.tasks || [],
     entries: raw.entries || [],
     filters: raw.filters || [],
+    todoLayout: raw.todoLayout || null,
   };
 }
 
@@ -168,7 +170,7 @@ function isUserBusy() {
   );
   return Boolean(
     ui.editingTask || ui.editingEntry || ui.editingClient || ui.editingProject || ui.editingCategory ||
-    kanbanDrag || ganttDrag || typing
+    kanbanDrag || ganttDrag || todoGroupDrag || typing
   );
 }
 
