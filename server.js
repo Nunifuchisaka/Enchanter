@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 // テストはvm上でこのファイルを実行するため、相対パスではなく__dirname基準で読み込む
-const { createStore, readJsonSafe, writeJsonAtomic } = require(path.join(__dirname, 'store.js'));
+const { createStore, readJsonSafe, writeJsonAtomic, IMAGE_TYPES } = require(path.join(__dirname, 'store.js'));
 
 // ---- 設定 ----
 const PORT = Number(process.env.PORT) || 8787;
@@ -87,25 +87,32 @@ function requireCsrfHeader(req, res) {
   return true;
 }
 
-// リクエストボディを文字列として読み切ってから onEnd に渡す。
+// リクエストボディをバイト列として読み切ってから onEnd に渡す。
 // MAX_BODY を超えた場合は413を返して接続を切り、onEnd は呼ばない。
-function readBody(req, res, onEnd) {
+function readBodyBuffer(req, res, onEnd) {
   const chunks = [];
   let size = 0;
   let aborted = false;
   req.on('data', (chunk) => {
+    if (aborted) return;
     size += chunk.length;
     if (size > MAX_BODY) {
       aborted = true;
       sendJson(res, 413, { error: 'データが大きすぎます' });
       req.destroy();
+      return;
     }
     chunks.push(chunk);
   });
   req.on('end', () => {
-    // チャンク境界で多バイト文字が割れるため、バイト列を結合してから文字列にする
-    if (!aborted) onEnd(Buffer.concat(chunks).toString('utf8'));
+    if (!aborted) onEnd(Buffer.concat(chunks));
   });
+}
+
+// リクエストボディを文字列として読み切ってから onEnd に渡す。
+function readBody(req, res, onEnd) {
+  // チャンク境界で多バイト文字が割れるため、バイト列を結合してから文字列にする
+  readBodyBuffer(req, res, (buffer) => onEnd(buffer.toString('utf8')));
 }
 
 // JSONとして読めて、かつオブジェクトであること(配列やnullは不可)を確認する
@@ -156,6 +163,51 @@ function handlePutData(req, res) {
     }
     res.writeHead(204, { [REVISION_HEADER]: revision });
     res.end();
+  });
+}
+
+// ---- 画像候補 ----
+
+// 画像の本体をそのまま受け取り、data/images/に保存してファイル名を返す。
+// 形式は中身で判定し、表示できる画像(PNG/JPEG/GIF/WebP/AVIF)以外は受け付けない
+function handleUploadImage(req, res) {
+  readBodyBuffer(req, res, (buffer) => {
+    try {
+      const file = store.saveImage(buffer);
+      if (!file) {
+        sendJson(res, 415, { error: 'PNG・JPEG・GIF・WebP・AVIFの画像だけを追加できます' });
+        return;
+      }
+      sendJson(res, 201, { file });
+    } catch (error) {
+      sendInternalError(res, error);
+    }
+  });
+}
+
+// ファイル名は採番した形式だけを受け付ける。内容を推測して別の形式として扱わせない(nosniff)・
+// 画像を直接開いてもスクリプトなどを動かさない(CSP)。同じ名前の中身は変わらないので長くキャッシュさせる
+function handleGetImage(file, res) {
+  const full = store.imagePath(file);
+  if (!full) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not Found');
+    return;
+  }
+  fs.readFile(full, (error, buffer) => {
+    if (error) {
+      res.writeHead(error.code === 'ENOENT' ? 404 : 500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(error.code === 'ENOENT' ? 'Not Found' : 'Internal Server Error');
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': IMAGE_TYPES[file.split('.').pop()],
+      'Content-Length': buffer.length,
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+    });
+    res.end(buffer);
   });
 }
 
@@ -397,6 +449,17 @@ function routeRequest(req, res) {
     return;
   }
 
+  // ---- 画像候補 ----
+  if (url.pathname === '/api/images') {
+    if (allowMethod(req, res, 'POST') && requireCsrfHeader(req, res)) handleUploadImage(req, res);
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/images/')) {
+    if (allowMethod(req, res, 'GET')) handleGetImage(url.pathname.slice('/api/images/'.length), res);
+    return;
+  }
+
   // ---- Google カレンダー連携 ----
   if (url.pathname === '/api/google/status') {
     if (allowMethod(req, res, 'GET')) handleGoogleStatus(res);
@@ -441,6 +504,14 @@ const server = http.createServer((req, res) => {
     sendInternalError(res, error);
   }
 });
+
+// 削除済みの候補の画像ファイルを起動時に片付ける(データにもバックアップにも残っていないものだけ)
+try {
+  const removed = store.removeUnusedImages();
+  if (removed) console.log(`使われていない画像を${removed}件削除しました`);
+} catch (error) {
+  console.warn('使われていない画像の整理に失敗しました', error);
+}
 
 server.listen(PORT, HOST, () => {
   console.log(`Enchanter が起動しました: http://localhost:${PORT} (bind: ${HOST})`);

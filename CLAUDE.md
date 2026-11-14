@@ -12,7 +12,7 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 
 ## タスクの操作(登録・一覧・計測など)
 
-ユーザーに頼まれたタスク操作は`node cli.js <コマンド>`で行う。サーバーの起動は不要で、画面を開いていれば数秒で反映される。コマンド一覧と出力形式は`node cli.js help`(短い)。例: `node cli.js add 請求書を送る -p Webサイト --start tomorrow -i 2`、`node cli.js ls --today`、`node cli.js done <id>`。出力は1件1行で、先頭がid(前方一致で指定可)。
+ユーザーに頼まれたタスク操作は`node cli.js <コマンド>`で行う。サーバーの起動は不要で、画面を開いていれば数秒で反映される。コマンド一覧と出力形式は`node cli.js help`(短い)。例: `node cli.js add 請求書を送る -p Webサイト --start tomorrow -i 2`、`node cli.js ls --today`、`node cli.js done <id>`、画像候補の追加は`node cli.js img <id> add <ファイル|フォルダ>`。出力は1件1行で、先頭がid(前方一致で指定可)。
 
 ## トークンを節約するための作業ルール
 
@@ -33,12 +33,14 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 | データを変更する操作(タイマー・状態変更・削除/取り消し)、URLハッシュ | `js/mutations.js` |
 | 描画の共通部品(`esc`、選択肢、チップ、Todo/カンバン共通の絞り込みUI) | `js/render-common.js` |
 | 各タブの描画 | `js/tab-todo.js` / `tab-kanban.js` / `tab-timeline.js` / `tab-gantt.js` / `tab-report.js` / `tab-manage.js` |
+| 画像候補(比較ボード)のデータ操作・アップロード・表示設定 | `js/image-compare.js`(mutationsの直後。CLIも読み込む) |
+| 画像候補の描画(タスク行のサムネイル・カンバンの表紙・比較ボード) | `js/view-compare.js` / `css/compare.css` |
 | CSV出力・バックアップのインポート | `js/export.js` |
 | `renderAll`(画面全体の再描画)・計測中表示 | `js/render-app.js`(全タブより後に読み込む) |
 | クリック・入力・送信・ドラッグ・キーボードの処理 | `js/events.js` |
 | 経過時間の毎秒更新・`init()` | `js/main.js`(最後に読み込む) |
 | スタイル | `css/base.css`(トークン・共通部品) / `css/<タブ名>.css` / `css/responsive.css`(最後。全タブを上書き) |
-| データの検証(`sanitizeData`)・ファイルの読み書き・バックアップ・リビジョン | `store.js`(server.jsとcli.jsが共用) |
+| データの検証(`sanitizeData`)・ファイルの読み書き・バックアップ・リビジョン・画像ファイルの保存と整理 | `store.js`(server.jsとcli.jsが共用) |
 | API・静的配信・Googleカレンダー連携 | `server.js` |
 | タスク操作CLI | `cli.js`(`js/`のconstants〜mutationsをvmで読み込んで画面と同じ副作用を再利用する) |
 | テスト | `tests/task-improvements.test.js`(画面・ロジック) / `tests/static-assets.test.js`(配信) / `tests/cli.test.js`(CLI・同時編集) |
@@ -58,15 +60,17 @@ Enchanterはセルフホスト・単一ユーザー向けのタスク管理 + �
 ### イベントと編集
 
 - イベントは`js/events.js`の**イベント種別ごとに1つの委譲リスナー**で処理する。新しいコントロールは、テンプレートに`data-action="..."`(と`data-id`など)を付け、該当リスナーの`switch`に`case`を足す。要素ごとにリスナーを付けない
+- 画像候補の比較ボードだけは全画面で重ねて表示する(`#compare-root`。`ui.compareTaskId`がある間`renderAll()`が描画し、背後の画面は`inert`にする)。キー操作は`handleCompareKey()`が他のショートカットより先に処理する
 - 編集はモーダルではなくインラインフォーム。`ui.editingTask`などにidを入れると該当`render*`が行をフォームに差し替える。`clearEditing()`で全編集状態を戻してから新しい編集に入るので、編集中は常に1つだけ
 
 ### 認証なしのセキュリティモデル(必ず維持する)
 
 信頼境界は「ポートに到達できる者すべて」。
 
-- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
+- 状態変更系エンドポイント(`PUT /api/data`、`POST /api/images`、`POST /api/google/disconnect`、`POST /api/calendar/sync-entry`)は`requireCsrfHeader()`で`X-Requested-With: enchanter`を必須にしている。サーバーは`OPTIONS`に応答せずCORSヘッダーも返さないので、外部サイトからのCSRFを防げる。新しい状態変更系エンドポイントも同じチェックを入れ、クライアントの`fetch()`にも同ヘッダーを付ける
 - データファイルへの書き込みは必ず`store.js`の`writeData()`(内部で`sanitizeData()`を通す)を使う。`color`・`estimateMinutes`などクライアントが`esc()`なしでHTML属性に埋め込む値はここで形式を強制している。HTML属性に描画する列挙型の項目を追加するときは、サーバー側で検証するか描画時に`esc()`する
 - 静的ファイルは`/`・`/index.html`と、`/js/`・`/css/`直下の英小文字・数字・ハイフン名のファイルだけを配信する(`staticRouteFor()`)
+- 画像候補(`POST /api/images`)は中身のバイト列で形式を判定し(`detectImageType`)、PNG/JPEG/GIF/WebP/AVIFだけを`data/images/<32桁16進>.<拡張子>`に保存する。SVGはスクリプトを含められるので受け付けない。配信(`GET /api/images/<file>`)はファイル名の形式を固定し、`nosniff`とCSP(`sandbox`)を付ける
 
 ### その他
 

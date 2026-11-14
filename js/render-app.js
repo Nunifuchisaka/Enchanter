@@ -60,12 +60,42 @@ function renderAll() {
     if (nextFocus) nextFocus.focus({ preventScroll: true });
   }
 
+  renderCompareRoot();
+
   if (deletionHistory.length) {
     view.insertAdjacentHTML('afterbegin', '<div class="undo-banner" role="status">削除を取り消せます（ページを開いている間、最大20件） <button class="btn" data-action="undo-delete">直前の削除を取り消す</button></div>');
   }
   // 全ての状態変更はここを通るので、URLへの反映はこの1箇所だけでよい
   // (replaceStateはhashchangeを発火しないのでループしない)
   history.replaceState(null, '', location.pathname + location.search + buildHash());
+}
+
+// 画像候補の比較ボード(全画面)。再描画で一覧のスクロール位置とフォーカスが飛ばないよう引き継ぐ
+function renderCompareRoot() {
+  const root = document.getElementById('compare-root');
+  if (!root) return;
+  const body = root.querySelector('.compare-body');
+  const scrollTop = body ? body.scrollTop : 0;
+  const active = document.activeElement;
+  const focused = active && root.contains(active) && active.dataset && active.dataset.action ? {
+    action: active.dataset.action, id: active.dataset.id || '', mark: active.dataset.mark || '', value: active.dataset.value || '',
+  } : null;
+  const html = renderCompareOverlay();
+  root.innerHTML = html;
+  document.body.classList.toggle('compare-open', Boolean(html));
+  // 全画面で開いている間は、背後の画面にTabでフォーカスが移らないようにする
+  document.querySelectorAll('.app-header, #view').forEach((element) => { element.inert = Boolean(html); });
+  const nextBody = root.querySelector('.compare-body');
+  if (nextBody) nextBody.scrollTop = scrollTop;
+  if (focused) {
+    const next = [...root.querySelectorAll(`[data-action="${focused.action}"]`)].find((element) =>
+      (element.dataset.id || '') === focused.id && (element.dataset.mark || '') === focused.mark && (element.dataset.value || '') === focused.value);
+    if (next) next.focus({ preventScroll: true });
+  } else if (html && !root.contains(document.activeElement)) {
+    // 開いた直後はボード内にフォーカスを移し、キー操作(Esc・矢印)がすぐ効くようにする
+    const overlay = root.querySelector('.compare-overlay');
+    if (overlay) overlay.focus({ preventScroll: true });
+  }
 }
 
 // 計測中の作業を画面上部にまとめて表示する

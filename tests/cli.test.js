@@ -180,3 +180,33 @@ test('links can be added, appended, removed and cleared from the CLI', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('img adds image files from a folder, marks and picks candidates, and rejects non-images', () => {
+  const dir = tempDataDir(SAMPLE);
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-img-'));
+  try {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]);
+    fs.writeFileSync(path.join(source, 'A案.png'), png);
+    fs.writeFileSync(path.join(source, 'B案.png'), png);
+    fs.writeFileSync(path.join(source, 'メモ.txt'), 'x');
+    fs.writeFileSync(path.join(source, 'C案.svg'), '<svg/>');
+    const added = cli(dir, 'img', 'aaa111', 'add', source, 'https://example.com/d.png');
+    assert.equal(added.code, 0, added.err);
+    assert.match(added.out, /^1 A案 [0-9a-f]{32}\.png\n2 B案 [0-9a-f]{32}\.png\n3 候補 3 https:\/\/example\.com\/d\.png$/);
+    assert.equal(cli(dir, 'img', 'aaa111', 'good', '2').code, 0);
+    assert.equal(cli(dir, 'img', 'aaa111', 'pick', '2').code, 0);
+    assert.equal(cli(dir, 'img', 'aaa111', 'note', '1', '文字が', '小さい').code, 0);
+    assert.match(cli(dir, 'img', 'aaa111').out, /^1 A案 \S+ — 文字が 小さい\n2 🏆 B案 /);
+    assert.match(cli(dir, 'ls').out, /既存 🏆3/);
+    const task = readFile(dir).tasks.find((item) => item.id === 'aaa111');
+    assert.equal(task.pickedImageId, task.images[1].id);
+    assert.equal(fs.readdirSync(path.join(dir, 'images')).length, 2);
+    const bad = cli(dir, 'img', 'aaa111', 'add', path.join(source, 'C案.svg'));
+    assert.equal(bad.code, 1);
+    assert.match(bad.err, /対応していない形式/);
+    assert.match(cli(dir, 'img', 'aaa111', 'rm', '9').err, /番号が不正/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(source, { recursive: true, force: true });
+  }
+});

@@ -32,6 +32,12 @@ const ui = {
   editingProject: null,
   editingCategory: null,
   googleStatus: { configured: false, connected: false },
+  // 画像候補の比較ボード(js/image-compare.js)。開いているタスクのid・拡大表示中の候補のid
+  compareTaskId: null,
+  compareFocusId: null,
+  compareFilter: 'all', // all | good | hide-out
+  compareActualSize: false, // 拡大表示で画面に合わせず原寸で見る
+  compareUploading: 0,
 };
 
 // 進行中のドラッグ操作(ポインターイベントの途中経過)
