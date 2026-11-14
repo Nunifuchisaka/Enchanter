@@ -34,6 +34,7 @@ function kanbanCard(task) {
   return `
     <li class="kanban-card ${statusRowClass(task)}${isDueToday(task) ? ' due-today' : ''}"
       data-action-pointer="kanban-drag" data-id="${esc(task.id)}">
+      ${kanbanImageCover(task)}
       <div class="kanban-card-control" tabindex="0" role="slider"
         aria-label="${esc(task.title)}のステータス" aria-valuemin="0" aria-valuemax="${TASK_STATUS_ORDER.length - 1}"
         aria-valuenow="${statusIndex}" aria-valuetext="${TASK_STATUS_LABELS[task.status]}"
@@ -43,6 +44,7 @@ function kanbanCard(task) {
           ${commonTaskChips(task)}
           ${tagChips(task)}
           ${(task.links || []).length ? `<span class="chip" title="資料リンク">🔗 ${task.links.length}</span>` : ''}
+          ${kanbanImageChip(task)}
           ${subtasks.length ? `<span class="chip">☑ ${doneCount}/${subtasks.length}</span>` : ''}
           ${running ? '<span class="chip kanban-running">● 計測中</span>' : ''}
         </div>

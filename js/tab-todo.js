@@ -100,7 +100,7 @@ function todoTaskRow(task, now) {
   const statusClass = statusRowClass(task);
   const isToday = task.todayDate === todayStr();
   return `
-    <li class="task-item ${statusClass}${isDueToday(task) ? ' due-today' : ''}">
+    <li class="task-item ${statusClass}${isDueToday(task) ? ' due-today' : ''}" data-image-drop data-id="${esc(task.id)}">
       <button type="button" class="status-toggle${statusClass ? ' status-' + statusClass : ''}"
         data-action="cycle-status" data-id="${esc(task.id)}"
         aria-label="ステータス: ${TASK_STATUS_LABELS[task.status]}(クリックで次の状態へ)"
@@ -115,11 +115,13 @@ function todoTaskRow(task, now) {
           ${linkChips(task)}
           ${totalChip(task, totalMs)}
         </div>
+        ${taskImageStrip(task)}
         ${subtaskBlockHtml(task)}
       </div>
       <div class="task-actions">
         ${todoTimerControls(task, running, now)}
         ${task.status !== 'done' ? `<button class="btn" data-action="toggle-today" data-id="${esc(task.id)}" aria-pressed="${isToday}">${isToday ? '★ 今日やる' : '☆ 今日やる'}</button>` : ''}
+        ${compareOpenButton(task)}
         <button class="btn-icon" data-action="edit-task" data-id="${esc(task.id)}" title="タスクを編集" aria-label="${esc(task.title)}を編集">✎</button>
         ${taskDeleteButtonHtml(task)}
       </div>

@@ -19,6 +19,13 @@ const MONTH_RE = /^\d{4}-\d{2}$/;
 const REPEAT_VALUES = new Set(['daily', 'weekly', 'monthly']);
 const TASK_STATUSES = new Set(['todo', 'in_progress', 'waiting_review', 'done']);
 const FILTER_LEVELS = ['', '0', '1', '2', '3'];
+// 画像候補のファイル名(サーバーが採番する32桁の16進数+拡張子)。パストラバーサルを防ぐため形式を固定する
+const IMAGE_FILE_RE = /^[0-9a-f]{32}\.(?:png|jpg|gif|webp|avif)$/;
+const IMAGE_FILE_GLOBAL_RE = /[0-9a-f]{32}\.(?:png|jpg|gif|webp|avif)/g;
+const IMAGE_MARKS = new Set(['good', 'out']);
+const IMAGE_TYPES = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif' };
+// 画像候補の名前・メモの最大文字数(データファイルが際限なく膨らまないように)
+const IMAGE_TEXT_MAX = 2000;
 
 // ---- データの検証(読み込み時・保存時の両方で必ず通す) ----
 
@@ -72,6 +79,48 @@ function sanitizeLinks(links) {
   return sanitized;
 }
 
+// http/httpsのURLだけを正規化して返す。それ以外はnull
+function safeHttpUrl(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function optionalText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, IMAGE_TEXT_MAX) : null;
+}
+
+// 画像候補は[{ id, file, url, label, note, mark, addedAt }]。fileはサーバーに保存した画像のファイル名、
+// urlは外部画像。どちらもsrc属性に入るので、fileは形式を固定し、urlはhttp/httpsだけを許可する
+function sanitizeImages(images) {
+  if (!Array.isArray(images)) return [];
+  const seenIds = new Set();
+  const sanitized = [];
+  for (const image of images) {
+    if (!image || typeof image !== 'object') continue;
+    const file = typeof image.file === 'string' && IMAGE_FILE_RE.test(image.file) ? image.file : null;
+    const url = file ? null : safeHttpUrl(image.url);
+    if (!file && !url) continue;
+    let id = ensureId(image.id);
+    if (seenIds.has(id)) id = crypto.randomUUID();
+    seenIds.add(id);
+    sanitized.push({
+      id,
+      file,
+      url,
+      label: optionalText(image.label),
+      note: optionalText(image.note),
+      mark: IMAGE_MARKS.has(image.mark) ? image.mark : null,
+      addedAt: Number.isFinite(image.addedAt) ? image.addedAt : Date.now(),
+    });
+  }
+  return sanitized;
+}
+
 // status未設定の旧データ(done: booleanのみ)を新形式へ変換する後方互換マイグレーション
 function sanitizeStatus(task) {
   if (TASK_STATUSES.has(task.status)) return task.status;
@@ -91,6 +140,7 @@ function sanitizeTask(task) {
   const rest = { ...task };
   delete rest.done; // 旧フィールド(done)は保存先から除去する
   const status = sanitizeStatus(task);
+  const images = sanitizeImages(task.images);
   return {
     ...rest,
     status,
@@ -111,6 +161,9 @@ function sanitizeTask(task) {
     tags: sanitizeTags(task.tags),
     links: sanitizeLinks(task.links),
     subtasks: sanitizeSubtasks(task.subtasks),
+    images,
+    // 採用した候補は実在する候補のidだけを残す
+    pickedImageId: images.some((image) => image.id === task.pickedImageId) ? task.pickedImageId : null,
   };
 }
 
@@ -247,7 +300,76 @@ function createStore(dataDir) {
     return revisionOf(text);
   }
 
-  return { dataDir, dataFile, readData, readDataWithRevision, currentRevision, writeData };
+  // ---- 画像候補のファイル(data/images/) ----
+  const imagesDir = path.join(dataDir, 'images');
+
+  // 中身から形式を判定して保存し、ファイル名を返す。対応していない形式(SVGなど)はnull
+  function saveImage(buffer) {
+    const ext = detectImageType(buffer);
+    if (!ext) return null;
+    fs.mkdirSync(imagesDir, { recursive: true });
+    const file = `${crypto.randomBytes(16).toString('hex')}.${ext}`;
+    writeTextAtomic(path.join(imagesDir, file), buffer);
+    return file;
+  }
+
+  // ファイル名の形式を確かめてからパスを返す(不正ならnull)
+  function imagePath(file) {
+    return typeof file === 'string' && IMAGE_FILE_RE.test(file) ? path.join(imagesDir, file) : null;
+  }
+
+  // データにも日次バックアップにも出てこない画像を消す。保存前のアップロード直後の画像を
+  // 消さないよう、一定時間より古いものだけを対象にする。消した件数を返す
+  function removeUnusedImages(minAgeMs = 24 * 60 * 60 * 1000) {
+    let files;
+    try {
+      files = fs.readdirSync(imagesDir).filter((file) => IMAGE_FILE_RE.test(file));
+    } catch {
+      return 0;
+    }
+    if (!files.length) return 0;
+    const used = new Set();
+    const collect = (file) => {
+      try {
+        for (const match of fs.readFileSync(file, 'utf8').matchAll(IMAGE_FILE_GLOBAL_RE)) used.add(match[0]);
+      } catch { /* 読めないファイルは参照なしとして扱う */ }
+    };
+    collect(dataFile);
+    const backupDir = path.join(dataDir, 'backups');
+    try {
+      fs.readdirSync(backupDir).filter((file) => file.endsWith('.json')).forEach((file) => collect(path.join(backupDir, file)));
+    } catch { /* バックアップがまだ無い */ }
+    const threshold = Date.now() - minAgeMs;
+    let removed = 0;
+    for (const file of files) {
+      if (used.has(file)) continue;
+      const full = path.join(imagesDir, file);
+      try {
+        if (fs.statSync(full).mtimeMs > threshold) continue;
+        fs.unlinkSync(full);
+        removed += 1;
+      } catch { /* 消せなければ次回に回す */ }
+    }
+    return removed;
+  }
+
+  return {
+    dataDir, dataFile, readData, readDataWithRevision, currentRevision, writeData,
+    imagesDir, saveImage, imagePath, removeUnusedImages,
+  };
 }
 
-module.exports = { createStore, sanitizeData, readJsonSafe, writeJsonAtomic };
+// 先頭のバイト列から画像の形式(拡張子)を判定する。表示できる形式だけを受け付け、
+// SVG(スクリプトを含められる)やHTMLを画像として保存・配信しない
+function detectImageType(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return null;
+  const ascii = (start, end) => buffer.toString('latin1', start, end);
+  if (buffer[0] === 0x89 && ascii(1, 4) === 'PNG') return 'png';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpg';
+  if (ascii(0, 4) === 'GIF8') return 'gif';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'webp';
+  if (ascii(4, 8) === 'ftyp' && ['avif', 'avis'].includes(ascii(8, 12))) return 'avif';
+  return null;
+}
+
+module.exports = { createStore, sanitizeData, readJsonSafe, writeJsonAtomic, detectImageType, IMAGE_FILE_RE, IMAGE_TYPES };

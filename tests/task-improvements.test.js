@@ -395,3 +395,132 @@ test('sanitizeData keeps only http(s) links with normalized titles', () => {
   ]);
   assert.deepEqual(sanitizeData({ tasks: [{ id: 'b' }] }).tasks[0].links, []);
 });
+
+/* ---------- 画像候補の比較 ---------- */
+
+const IMG_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png';
+const IMG_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg';
+
+test('sanitizeData keeps image candidates with a stored file or http(s) URL and a valid pick', () => {
+  const { sanitizeData } = require(path.join(root, 'store.js'));
+  const task = sanitizeData({ tasks: [{ id: 't', images: [
+    { id: 'a', file: IMG_A, url: 'https://ignored.example.com/a.png', label: '  A案 ', mark: 'good', addedAt: 5 },
+    { id: 'b', url: 'https://example.com/b.png', mark: 'bogus', note: ' ' },
+    { id: 'c', file: '../server.js' },
+    { id: 'd', url: 'javascript:alert(1)' },
+    { id: 'a', file: IMG_B },
+    null,
+  ], pickedImageId: 'c' }] }).tasks[0];
+  assert.deepEqual(task.images.slice(0, 2).map(({ addedAt, ...image }) => image), [
+    { id: 'a', file: IMG_A, url: null, label: 'A案', note: null, mark: 'good' },
+    { id: 'b', file: null, url: 'https://example.com/b.png', label: null, note: null, mark: null },
+  ]);
+  assert.equal(task.images.length, 3);
+  assert.notEqual(task.images[2].id, 'a'); // 重複したidは振り直す
+  assert.equal(task.pickedImageId, null); // 捨てた候補は採用として残さない
+  assert.equal(sanitizeData({ tasks: [{ id: 'u', images: [{ id: 'x', file: IMG_A }], pickedImageId: 'x' }] }).tasks[0].pickedImageId, 'x');
+  assert.deepEqual(sanitizeData({ tasks: [{ id: 'v' }] }).tasks[0].images, []);
+});
+
+test('image candidates: marks, a single pick, moving and removing', () => {
+  const { run } = client();
+  run(`data.tasks = [{id:'t', title:'サムネイルを選ぶ', status:'todo'}];
+    addTaskImages(taskById('t'), [{file:'${IMG_A}', label:'A'}, {url:'https://example.com/b.png'}, {url:'https://example.com/b.png'}, {url:'javascript:alert(1)'}, {file:'../x.png'}]);`);
+  assert.equal(run('data.tasks[0].images.length'), 2);
+  const [a, b] = JSON.parse(run('JSON.stringify(data.tasks[0].images.map((image) => image.id))'));
+  run(`togglePickImage(taskById('t'), '${a}');`);
+  assert.equal(run('data.tasks[0].pickedImageId'), a);
+  run(`togglePickImage(taskById('t'), '${b}');`);
+  assert.equal(run('data.tasks[0].pickedImageId'), b); // 採用は1件だけ
+  run(`toggleImageMark(taskById('t'), '${b}', 'out');`);
+  assert.equal(run('data.tasks[0].pickedImageId'), null); // 外したら採用も外れる
+  run(`toggleImageMark(taskById('t'), '${a}', 'good'); ui.compareFilter = 'good';`);
+  assert.deepEqual(JSON.parse(run(`JSON.stringify(visibleCompareImages(taskById('t')).map((image) => image.id))`)), [a]);
+  run(`ui.compareFilter = 'hide-out'; togglePickImage(taskById('t'), '${b}');`);
+  assert.equal(run(`taskById('t').images[1].mark`), null); // 採用すると「外す」は解除
+  assert.equal(run(`moveTaskImage(taskById('t'), '${b}', -1)`), true);
+  assert.equal(run('data.tasks[0].images[0].id'), b);
+  assert.equal(run(`moveTaskImage(taskById('t'), '${b}', -1)`), false);
+  run(`removeTaskImage(taskById('t'), '${b}');`);
+  assert.equal(run('data.tasks[0].images.length'), 1);
+  assert.equal(run('data.tasks[0].pickedImageId'), null);
+});
+
+test('todo rows and the compare board render escaped candidates, and the board opens from the hash', () => {
+  const { run } = client();
+  run(`data.tasks = [{id:'t', title:'<b>サムネ</b>', status:'todo', links:[{url:'https://example.com/c.webp?x=1', title:'C案'}, {url:'https://example.com/doc', title:null}],
+    images:[{id:'i1', file:'${IMG_A}', url:null, label:'"><img src=x onerror=alert(1)>', note:'<script>', mark:'good'},
+            {id:'i2', file:null, url:'https://example.com/b.png?a=1&b=2', label:null, note:null, mark:'out'}],
+    pickedImageId:'i1'}, {id:'empty', title:'画像なし', status:'todo'}];`);
+  const row = run('renderTodo()');
+  assert.ok(row.includes(`src="/api/images/${IMG_A}"`));
+  assert.ok(row.includes('src="https://example.com/b.png?a=1&amp;b=2"'));
+  assert.ok(row.includes('referrerpolicy="no-referrer"'));
+  assert.ok(row.includes('🏆 採用: &quot;&gt;&lt;img'));
+  assert.ok(!row.includes('<img src=x'));
+  assert.ok(row.includes('compare-open-btn is-empty')); // 候補が無いタスクにも追加の入口がある
+  assert.equal(run('renderCompareOverlay()'), '');
+
+  run(`location = { hash: '#kanban?compare=t', pathname: '/', search: '' };`);
+  run('applyHash();');
+  assert.equal(run('ui.compareTaskId'), 't');
+  assert.ok(run('buildHash()').includes('compare=t'));
+  const board = run('renderCompareOverlay()');
+  assert.ok(board.includes('&lt;b&gt;サムネ&lt;/b&gt;'));
+  assert.ok(board.includes('&lt;script&gt;'));
+  assert.ok(!board.includes('<script>'));
+  assert.ok(board.includes('🔗 資料リンクの画像 1件を候補に追加'));
+  assert.ok(board.includes('に決めて完了'));
+  assert.ok(board.includes('data-action-change="image-files"'));
+  run(`ui.compareFocusId = 'i2';`);
+  assert.ok(run('renderCompareOverlay()').includes('compare-focus'));
+  run(`location = { hash: '#kanban', pathname: '/', search: '' }; applyHash();`);
+  assert.equal(run('ui.compareTaskId'), null);
+  run(`openCompare('missing');`);
+  assert.equal(run('ui.compareTaskId'), null);
+});
+
+test('compare board clicks change marks and completing with a pick closes the board', () => {
+  const { run, listeners } = client();
+  run(`data.tasks = [{id:'t', title:'T', status:'todo', links:[{url:'https://example.com/c.png', title:'C案'}],
+    images:[{id:'i1', file:'${IMG_A}', url:null, label:null, note:null, mark:null}], pickedImageId:null}];`);
+  const click = (dataset) => {
+    const element = { dataset };
+    listeners.click({ target: { closest: (selector) => (selector === '[data-action]' ? element : null) } });
+  };
+  click({ action: 'compare-open', id: 't' });
+  assert.equal(run('ui.compareTaskId'), 't');
+  click({ action: 'image-mark', id: 'i1', mark: 'good' });
+  assert.equal(run('data.tasks[0].images[0].mark'), 'good');
+  click({ action: 'image-from-links', id: 't' });
+  assert.equal(run('data.tasks[0].images[1].label'), 'C案');
+  click({ action: 'image-delete', id: 'i1' });
+  assert.equal(run('data.tasks[0].images.length'), 2); // 1回目は確認状態
+  click({ action: 'image-pick', id: 'i1' });
+  assert.equal(run('data.tasks[0].pickedImageId'), 'i1');
+  click({ action: 'compare-complete', id: 't' });
+  assert.equal(run('data.tasks[0].status'), 'done');
+  assert.equal(run('ui.compareTaskId'), null);
+});
+
+test('unused image files are removed only when no data or backup refers to them', () => {
+  const { createStore } = require(path.join(root, 'store.js'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enchanter-test-'));
+  try {
+    const store = createStore(dir);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]);
+    const [used, backedUp, unused, fresh] = [png, png, png, png].map((buffer) => store.saveImage(buffer));
+    assert.match(used, /^[0-9a-f]{32}\.png$/);
+    assert.equal(store.saveImage(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>')), null);
+    store.writeData({ tasks: [{ id: 't', title: 'T', images: [{ id: 'i', file: used }] }] });
+    fs.mkdirSync(path.join(dir, 'backups'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'backups', 'enchanter-2026-01-01.json'), JSON.stringify({ tasks: [{ images: [{ file: backedUp }] }] }));
+    const old = Date.now() / 1000 - 3 * 24 * 3600;
+    [used, backedUp, unused].forEach((file) => fs.utimesSync(store.imagePath(file), old, old));
+    assert.equal(store.removeUnusedImages(), 1);
+    assert.deepEqual(fs.readdirSync(store.imagesDir).sort(), [used, backedUp, fresh].sort());
+    assert.equal(store.imagePath('../enchanter-data.json'), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

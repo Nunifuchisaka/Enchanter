@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="css/gantt.css">
   <link rel="stylesheet" href="css/report.css">
   <link rel="stylesheet" href="css/manage.css">
+  <link rel="stylesheet" href="css/compare.css">
   <link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
@@ -34,12 +35,15 @@
     </nav>
   </header>
   <main id="view" class="view"></main>
+  <!-- 画像候補の比較ボード(全画面)。ui.compareTaskIdがある間だけ中身を描画する -->
+  <div id="compare-root"></div>
   <!-- 通常のscriptなのでトップレベルの宣言は全ファイルで共有される。読み込み時に他ファイルの関数を呼ぶ処理は、その定義より後に置くこと(render-app.jsはタブより後、main.jsが最後) -->
   <script src="js/constants.js"></script>
   <script src="js/time.js"></script>
   <script src="js/state.js"></script>
   <script src="js/domain.js"></script>
   <script src="js/mutations.js"></script>
+  <script src="js/image-compare.js"></script>
   <script src="js/render-common.js"></script>
   <script src="js/tab-todo.js"></script>
   <script src="js/tab-kanban.js"></script>
@@ -48,6 +52,7 @@
   <script src="js/export.js"></script>
   <script src="js/tab-report.js"></script>
   <script src="js/tab-manage.js"></script>
+  <script src="js/view-compare.js"></script>
   <script src="js/render-app.js"></script>
   <script src="js/events.js"></script>
   <script src="js/main.js"></script>

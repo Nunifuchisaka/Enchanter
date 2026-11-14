@@ -11,6 +11,203 @@ function clearInsertMarkers() {
   });
 }
 
+/* ----- 画像候補の比較ボード ----- */
+
+// 比較ボードのクリック操作。falseを返したら再描画しない
+function handleCompareClick(action, id, element) {
+  const task = taskById(ui.compareTaskId);
+  switch (action) {
+    case 'compare-open':
+      openCompare(id);
+      return true;
+    case 'compare-close':
+      closeCompare();
+      return true;
+  }
+  if (!task) return false;
+  switch (action) {
+    case 'compare-focus':
+      ui.compareFocusId = imageById(task, id) ? id : null;
+      ui.compareActualSize = false;
+      break;
+    case 'compare-unfocus':
+      ui.compareFocusId = null;
+      break;
+    case 'compare-step':
+      stepCompareFocus(task, Number(element.dataset.delta));
+      break;
+    case 'compare-actual':
+      ui.compareActualSize = !ui.compareActualSize;
+      break;
+    case 'compare-filter':
+      if (!COMPARE_FILTERS.includes(element.dataset.value)) return false;
+      ui.compareFilter = element.dataset.value;
+      break;
+    case 'compare-bg':
+      if (!COMPARE_BACKGROUNDS[element.dataset.value]) return false;
+      comparePrefs.bg = element.dataset.value;
+      storeComparePrefs();
+      break;
+    case 'compare-complete':
+      if (!pickedImage(task)) return false;
+      setTaskStatus(task, 'done');
+      closeCompare();
+      save();
+      break;
+    case 'image-mark':
+      if (!toggleImageMark(task, id, element.dataset.mark)) return false;
+      save();
+      break;
+    case 'image-pick':
+      if (!togglePickImage(task, id)) return false;
+      save();
+      break;
+    case 'image-move':
+      if (!moveTaskImage(task, id, Number(element.dataset.delta))) return false;
+      save();
+      break;
+    case 'image-delete':
+      if (armedDeleteImageId !== id) {
+        armedDeleteImageId = id;
+        break;
+      }
+      armedDeleteImageId = null;
+      if (removeTaskImage(task, id)) save();
+      break;
+    case 'image-from-links':
+      if (!addTaskImages(task, linkImageCandidates(task).map((link) => ({ url: link.url, label: link.title }))).length) return false;
+      save();
+      break;
+    default:
+      return false;
+  }
+  return true;
+}
+
+// 比較ボードを開いている間のキー操作。trueを返したら他のショートカットは処理しない
+function handleCompareKey(event, isTextInput) {
+  const task = taskById(ui.compareTaskId);
+  if (!task) return false;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    // 入力中ならまず入力欄を抜ける(changeで保存される)。描き直して入力途中の内容を消さない
+    if (isTextInput) event.target.blur();
+    else if (ui.compareFocusId) ui.compareFocusId = null;
+    else closeCompare();
+    if (!isTextInput) renderAll();
+    return true;
+  }
+  if (isTextInput || event.ctrlKey || event.metaKey || event.altKey) return true;
+  const key = event.key.toLowerCase();
+  const images = taskImages(task);
+  if (/^[1-9]$/.test(key)) {
+    const image = images[Number(key) - 1];
+    if (image) {
+      ui.compareFocusId = image.id;
+      ui.compareActualSize = false;
+      renderAll();
+    }
+    return true;
+  }
+  if (!ui.compareFocusId) return true;
+  const actions = {
+    arrowleft: () => stepCompareFocus(task, -1),
+    arrowright: () => stepCompareFocus(task, 1),
+    g: () => toggleImageMark(task, ui.compareFocusId, 'good') && save(),
+    x: () => toggleImageMark(task, ui.compareFocusId, 'out') && save(),
+    p: () => togglePickImage(task, ui.compareFocusId) && save(),
+    z: () => { ui.compareActualSize = !ui.compareActualSize; },
+  };
+  if (!actions[key]) return true;
+  event.preventDefault();
+  actions[key]();
+  renderAll();
+  return true;
+}
+
+// ドラッグ中のものが画像として取り込めるか(ファイル、または他のページからドラッグした画像・URL)
+function isImageDrag(dataTransfer) {
+  const types = dataTransfer ? [...dataTransfer.types] : [];
+  return types.includes('Files') || types.includes('text/uri-list');
+}
+
+// 他のページからドラッグした画像のURL。<img>のsrcを優先し、リンクは画像を指すものだけを受け付ける
+// (資料リンクのチップなどをうっかり落としても、画像でないページを候補にしない)
+function droppedImageUrl(dataTransfer) {
+  const html = dataTransfer.getData('text/html') || '';
+  const match = /<img\b[^>]*\bsrc=["']([^"']+)["']/i.exec(html);
+  const src = match ? safeLinkUrl(match[1].replace(/&amp;/g, '&')) : null;
+  if (src) return src;
+  const uri = (dataTransfer.getData('text/uri-list') || '').split(/\r?\n/).find((line) => line && !line.startsWith('#'));
+  return uri && IMAGE_URL_RE.test(uri) ? safeLinkUrl(uri) : null;
+}
+
+function clearDropHighlight() {
+  document.querySelectorAll('.image-drop-over').forEach((element) => element.classList.remove('image-drop-over'));
+}
+
+document.addEventListener('dragover', (event) => {
+  if (!isImageDrag(event.dataTransfer)) return;
+  const zone = event.target.closest ? event.target.closest('[data-image-drop]') : null;
+  // 比較ボードを開いている間は、取りこぼしたドロップでブラウザが画像のページへ移らないようにする
+  if (!zone && !ui.compareTaskId) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = zone ? 'copy' : 'none';
+  if (zone && !zone.classList.contains('image-drop-over')) {
+    clearDropHighlight();
+    zone.classList.add('image-drop-over');
+  }
+});
+
+document.addEventListener('dragleave', (event) => {
+  const zone = event.target.closest ? event.target.closest('[data-image-drop]') : null;
+  if (zone && !zone.contains(event.relatedTarget)) zone.classList.remove('image-drop-over');
+});
+
+document.addEventListener('drop', (event) => {
+  if (!isImageDrag(event.dataTransfer)) return;
+  const zone = event.target.closest ? event.target.closest('[data-image-drop]') : null;
+  if (!zone && !ui.compareTaskId) return;
+  event.preventDefault();
+  clearDropHighlight();
+  if (!zone) return;
+  const files = event.dataTransfer.files;
+  if (files && files.length) {
+    addImageFilesToTask(zone.dataset.id, files);
+    return;
+  }
+  const url = droppedImageUrl(event.dataTransfer);
+  if (!url || !addImageUrlToTask(zone.dataset.id, url)) return;
+  openCompare(zone.dataset.id, ui.compareTaskId === zone.dataset.id ? ui.compareFocusId : null);
+  renderAll();
+});
+
+// 比較ボードを開いている間は、スクリーンショットなどの画像の貼り付けで候補を追加する
+document.addEventListener('paste', (event) => {
+  if (!ui.compareTaskId || !event.clipboardData) return;
+  const files = [...(event.clipboardData.files || [])].filter((file) => /^image\//.test(file.type));
+  if (files.length) {
+    event.preventDefault();
+    addImageFilesToTask(ui.compareTaskId, files);
+    return;
+  }
+  if (event.target.matches && event.target.matches('input, textarea')) return;
+  const text = event.clipboardData.getData('text') || '';
+  if (!/^\s*https?:\/\//i.test(text)) return;
+  event.preventDefault();
+  if (addImageUrlToTask(ui.compareTaskId, text)) renderAll();
+});
+
+// 比較ボードの大きさスライダーは、動かしている間も描き直さずに幅だけ変える
+document.addEventListener('input', (event) => {
+  const element = event.target.closest ? event.target.closest('[data-action-input]') : null;
+  if (!element || element.dataset.actionInput !== 'compare-size') return;
+  comparePrefs.size = clampCompareSize(element.value);
+  storeComparePrefs();
+  document.querySelectorAll('.compare-grid').forEach((grid) => grid.style.setProperty('--compare-size', `${comparePrefs.size}px`));
+  document.querySelectorAll('.compare-size-value').forEach((output) => { output.textContent = `${comparePrefs.size}px`; });
+});
+
 // Todoの分類エリアのドラッグ中に付けた挿入位置の目印を外す
 function clearTodoGroupMarkers() {
   document.querySelectorAll('.todo-group-insert-before, .todo-column-insert-end, .todo-column.drop-target').forEach((element) => {
@@ -59,9 +256,18 @@ document.addEventListener('click', (event) => {
   if (armedDeleteTaskId && !(element && element.dataset.action === 'del-task' && element.dataset.id === armedDeleteTaskId)) {
     disarmTaskDelete();
   }
+  // 画像候補の削除の確認状態も、同じボタン以外のクリックで解除する
+  if (armedDeleteImageId && !(element && element.dataset.action === 'image-delete' && element.dataset.id === armedDeleteImageId)) {
+    armedDeleteImageId = null;
+    if (!element) renderAll();
+  }
   if (!element) return;
   const action = element.dataset.action;
   const id = element.dataset.id;
+  if (action.startsWith('compare-') || action.startsWith('image-')) {
+    if (handleCompareClick(action, id, element) !== false) renderAll();
+    return;
+  }
 
   switch (action) {
     case 'undo-delete':
@@ -282,6 +488,22 @@ document.addEventListener('change', (event) => {
       ui.activeFilterId = filter ? filter.id : null;
       break;
     }
+    case 'image-label':
+    case 'image-note': {
+      // 入力欄を描き直すとTabで移った先のフォーカスが外れるので、保存だけして再描画しない
+      const image = imageById(taskById(ui.compareTaskId), element.dataset.id);
+      if (!image) return;
+      const value = element.value.trim();
+      image[element.dataset.actionChange === 'image-label' ? 'label' : 'note'] = value || null;
+      save();
+      return;
+    }
+    case 'image-files': {
+      const files = [...(element.files || [])];
+      element.value = '';
+      if (files.length) addImageFilesToTask(element.dataset.id, files); // 保存・再描画はaddImageFilesToTask側で行う
+      return;
+    }
     case 'import-backup': {
       const file = element.files && element.files[0];
       element.value = '';
@@ -334,6 +556,13 @@ document.addEventListener('submit', (event) => {
   let syncEntry = null;
 
   switch (form.dataset.actionSubmit) {
+    case 'image-url': {
+      if (!addImageUrlToTask(id, formData.get('url'))) {
+        alert('http(s)で始まる画像のURLを入力してください(すでに追加済みのURLは追加しません)');
+        return;
+      }
+      break;
+    }
     case 'stop-at': {
       const entry = entryById(id);
       if (!entry || entry.end !== null) return;
@@ -746,6 +975,7 @@ document.addEventListener('keydown', (event) => {
     if (input) input.click();
     return;
   }
+  if (ui.compareTaskId && handleCompareKey(event, isTextInput)) return;
   // 分類エリアのつまみ: Alt+↑↓で列内の順番、Alt+←→で隣の列へ移動する
   const groupHandle = target.closest ? target.closest('.group-drag-handle') : null;
   if (groupHandle && event.altKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {

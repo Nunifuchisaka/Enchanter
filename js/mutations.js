@@ -260,6 +260,8 @@ function buildHash() {
     params.set('from', ui.reportFrom);
     params.set('to', ui.reportTo);
   }
+  // 画像候補の比較ボードはどのタブの上でも開くので、再読み込みしても開き直せるよう残す
+  if (ui.compareTaskId) params.set('compare', ui.compareTaskId);
   const query = params.toString();
   return `#${ui.tab}${query ? `?${query}` : ''}`;
 }
@@ -295,6 +297,13 @@ function applyHash() {
   ui.tab = tab;
   const params = new URLSearchParams(query || '');
   const date = params.get('date');
+  const compareId = params.get('compare');
+  if (compareId && taskById(compareId)) {
+    if (ui.compareTaskId !== compareId) openCompare(compareId);
+  } else {
+    ui.compareTaskId = null;
+    ui.compareFocusId = null;
+  }
   if (tab === 'todo' || tab === 'kanban') {
     applyTodoHash(params);
   } else if (tab === 'timeline' && HASH_DATE_RE.test(date || '')) {

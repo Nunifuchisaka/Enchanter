@@ -19,7 +19,7 @@ const { createStore } = require('./store.js');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const PORT = Number(process.env.PORT) || 8787;
 // DOMに依存しない画面側のロジック(読み込み順はindex.htmlと同じ)
-const LOGIC_FILES = ['js/constants.js', 'js/time.js', 'js/state.js', 'js/domain.js', 'js/mutations.js'];
+const LOGIC_FILES = ['js/constants.js', 'js/time.js', 'js/state.js', 'js/domain.js', 'js/mutations.js', 'js/image-compare.js'];
 
 const HELP = `Enchanter CLI (サーバー不要。起動中の画面には数秒で反映)
 一覧  ls [-a 完了も] [--done] [--today] [-p プロジェクト] [-t タグ] [-q 検索語] [-s 状態] [-n 件数]
@@ -31,6 +31,8 @@ const HELP = `Enchanter CLI (サーバー不要。起動中の画面には数秒
 計測  start <id> / stop [id] (省略で全停止) / running
 記録  log <id> <開始> <終了>   例: log ab12 10:00 11:30 / log ab12 11/5T10:00 11/5T12:00
 小項  sub <id> <タイトル> / subdone <id> <番号>
+画像  img <id>  (画像候補の一覧) / img <id> add <画像ファイル|フォルダ|URL>...
+      img <id> pick|good|out|rm <番号> / img <id> name <番号> <名前> / img <id> note <番号> <メモ>
 削除  rm <id>  (作業記録も削除)
 集計  sum [--from 日付] [--to 日付]  (既定は今日)
 マスタ projects  (クライアント/プロジェクト/カテゴリ)
@@ -38,7 +40,8 @@ const HELP = `Enchanter CLI (サーバー不要。起動中の画面には数秒
   -e 見積(分) -t タグ(カンマ区切り) --note メモ -r daily|weekly|monthly
   -l 資料リンク("URL" か "タイトル URL"。複数回可。editでは追加、-l - で全消去) --unlink 番号(editで削除)
 日付: YYYY-MM-DD, M/D, today, tomorrow, +N, -N   id/プロジェクト名は一意なら前方一致・部分一致で可
-一覧の形式: id 状態 [!重要度] タイトル [@プロジェクト] [#タグ] [予定] [実績/見積] [☆今日] [▶計測中] [🔗リンク数] [小項目 済/全]`;
+一覧の形式: id 状態 [!重要度] タイトル [@プロジェクト] [#タグ] [予定] [実績/見積] [☆今日] [▶計測中] [🔗リンク数] [🖼画像候補数(🏆採用済み)] [小項目 済/全]
+画像候補の形式: 番号 [🏆採用|◎有力|✕外す] 名前 ファイル名|URL [— メモ]`;
 
 const STATUS_ALIASES = {
   todo: 'todo', wip: 'in_progress', doing: 'in_progress', in_progress: 'in_progress',
@@ -99,6 +102,7 @@ function loadLogic(rawData) {
   const logic = vm.runInContext(`({
     get data() { return data; }, uid, taskById, projectById, clientById, categoryById, runningEntries,
     runningEntryForTask, startTimer, stopTimer, stopAllTimers, setTaskStatus, compareActiveTasks,
+    taskImages, imageLabel, addTaskImages, toggleImageMark, togglePickImage, removeTaskImage,
     parseTags, parseLinks, parseLevel, parseEstimate, planLabel, isOverdue, isDueToday, todayStr, toDateStr,
     fromDateStr, addDays, entryDur, overlapMs, reportRangeMs, timeToTimestamp, googleEventTitle,
   })`, context);
@@ -209,6 +213,7 @@ function taskLine(L, task, now = Date.now()) {
   if (task.todayDate === L.todayStr()) parts.push('☆');
   if (L.runningEntryForTask(task.id)) parts.push('▶');
   if ((task.links || []).length) parts.push(`🔗${task.links.length}`);
+  if ((task.images || []).length) parts.push(`${task.pickedImageId ? '🏆' : '🖼'}${task.images.length}`);
   const subtasks = task.subtasks || [];
   if (subtasks.length) parts.push(`${subtasks.filter((subtask) => subtask.done).length}/${subtasks.length}`);
   return parts.join(' ');
@@ -285,6 +290,36 @@ function applyPlan(L, task, options) {
   Object.assign(task, { plannedStart: start.date, plannedEnd: end.date, plannedStartTime: start.time, plannedEndTime: end.time });
 }
 
+function imageLine(L, task, image, number = L.taskImages(task).indexOf(image) + 1) {
+  const mark = task.pickedImageId === image.id ? '🏆' : image.mark === 'good' ? '◎' : image.mark === 'out' ? '✕' : '';
+  const parts = [number];
+  if (mark) parts.push(mark);
+  parts.push(L.imageLabel(task, image), image.file || image.url);
+  if (image.note) parts.push(`— ${image.note.replace(/\s+/g, ' ')}`);
+  return parts.join(' ');
+}
+
+const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|avif)$/i;
+
+// URLはそのまま、ファイルは保存してファイル名に、フォルダは中の画像を名前順にすべて取り込む
+function imageSources(store, value) {
+  if (/^https?:\/\//i.test(value)) return [{ url: value }];
+  let stat;
+  try {
+    stat = fs.statSync(value);
+  } catch {
+    fail(`ファイルが見つかりません: ${value}`);
+  }
+  if (stat.isDirectory()) {
+    const files = fs.readdirSync(value).filter((name) => IMAGE_EXT_RE.test(name)).sort((a, b) => a.localeCompare(b, 'ja', { numeric: true }));
+    if (!files.length) fail(`フォルダに画像がありません: ${value}`);
+    return files.flatMap((name) => imageSources(store, path.join(value, name)));
+  }
+  const file = store.saveImage(fs.readFileSync(value));
+  if (!file) fail(`対応していない形式です(PNG・JPEG・GIF・WebP・AVIF): ${value}`);
+  return [{ file, label: path.basename(value).replace(/\.[^.]+$/, '') }];
+}
+
 function findTask(L, query) {
   return resolveId(L.data.tasks, query, 'タスク');
 }
@@ -350,7 +385,36 @@ const COMMANDS = {
     const lines = rows.filter(([, value]) => value !== null && value !== undefined).map(([key, value]) => `${key}: ${value}`);
     (task.links || []).forEach((link, index) => lines.push(`link ${index + 1}: ${link.title ? `${link.title} ` : ''}${link.url}`));
     (task.subtasks || []).forEach((subtask, index) => lines.push(`  ${index + 1} [${subtask.done ? 'x' : ' '}] ${subtask.title}`));
+    L.taskImages(task).forEach((image) => lines.push(`image ${imageLine(L, task, image)}`));
     return { output: lines.join('\n') };
+  },
+
+  // 画像候補。ファイルはサーバーと同じく data/images/ に保存し、形式は中身で判定する
+  img(L, { positional, store }) {
+    const task = findTask(L, positional[0]);
+    const [sub, ...rest] = positional.slice(1);
+    if (!sub) {
+      const images = L.taskImages(task);
+      return { output: images.length ? images.map((image) => imageLine(L, task, image)).join('\n') : '(画像候補なし。img <id> add <ファイル> で追加)' };
+    }
+    if (sub === 'add') {
+      if (!rest.length) fail('img <id> add <画像ファイル|フォルダ|URL>...');
+      const sources = rest.flatMap((value) => imageSources(store, value));
+      const added = L.addTaskImages(task, sources);
+      if (!added.length) fail('追加できる画像がありませんでした(PNG・JPEG・GIF・WebP・AVIF、または追加済みでないURL)');
+      return { changed: true, output: added.map((image) => imageLine(L, task, image)).join('\n') };
+    }
+    const image = L.taskImages(task)[Number(rest[0]) - 1] || fail(`画像候補の番号が不正です: ${rest[0] || ''}(img <id> で確認)`);
+    const text = rest.slice(1).join(' ').trim();
+    if (sub === 'pick') L.togglePickImage(task, image.id);
+    else if (sub === 'good' || sub === 'out') L.toggleImageMark(task, image.id, sub);
+    else if (sub === 'name') image.label = text || null;
+    else if (sub === 'note') image.note = text || null;
+    else if (sub === 'rm') {
+      L.removeTaskImage(task, image.id);
+      return { changed: true, output: `removed ${imageLine(L, task, image, '-')}` };
+    } else fail(`不明な操作: img ${sub}(add/pick/good/out/name/note/rm)`);
+    return { changed: true, output: imageLine(L, task, image) };
   },
 
   add(L, { positional, options }) {
@@ -537,7 +601,7 @@ async function main(argv) {
   const store = createStore(DATA_DIR);
   const { data, revision } = store.readDataWithRevision();
   const { logic, synced } = loadLogic(data);
-  const result = command(logic, args);
+  const result = command(logic, { ...args, store });
   if (result.changed) {
     // 読み込んでから書くまでの間に、画面など別の場所で保存されていたら上書きしない
     if (store.currentRevision() !== revision) fail('同時に別の場所でデータが更新されました。もう一度実行してください');

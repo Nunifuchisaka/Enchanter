@@ -1,0 +1,932 @@
+/* Enchanter: 画像候補(タスク行のサムネイル列・カンバンの表紙・全画面の比較ボード) */
+
+:root {
+  --pick: #8a5a00;
+  --pick-contrast: #ffffff;
+  --pick-soft: #fff4d6;
+  --pick-ring: rgba(214, 154, 20, 0.45);
+  --checker-a: #ffffff;
+  --checker-b: #e6e4ec;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pick: #f2c14e;
+    --pick-contrast: #1d1600;
+    --pick-soft: rgba(242, 193, 78, 0.14);
+    --pick-ring: rgba(242, 193, 78, 0.45);
+    --checker-a: #2b2836;
+    --checker-b: #201d2a;
+  }
+}
+
+body.compare-open {
+  overflow: hidden;
+}
+
+/* ---------- 共通部品: セグメント切り替え ---------- */
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.segmented-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text-sub);
+  padding: 6px 11px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.segmented-btn:hover {
+  color: var(--text);
+}
+
+.segmented-btn[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- Todoの行: 候補のサムネイル列 ---------- */
+
+.task-image-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  margin-top: 9px;
+  padding: 6px 12px 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: zoom-in;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.task-image-strip:hover {
+  border-color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.task-image-thumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.task-image-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+
+.task-image-thumb.is-picked {
+  width: 88px;
+  height: 50px;
+  box-shadow: 0 0 0 2px var(--pick);
+}
+
+.task-image-thumb.is-out {
+  opacity: 0.35;
+  filter: grayscale(0.8);
+}
+
+.task-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.task-image-more {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.task-image-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.has-pick .task-image-summary {
+  color: var(--pick);
+}
+
+.task-image-open {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.compare-open-btn.is-empty {
+  opacity: 0.4;
+}
+
+.task-item:hover .compare-open-btn.is-empty,
+.compare-open-btn.is-empty:focus-visible {
+  opacity: 1;
+}
+
+.task-item.image-drop-over {
+  background: var(--accent-softer);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---------- カンバンの表紙 ---------- */
+
+.kanban-cover {
+  display: block;
+  width: calc(100% + 24px);
+  margin: -12px -12px 10px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  background: var(--surface-2);
+  cursor: zoom-in;
+}
+
+.kanban-cover.is-picked {
+  box-shadow: inset 0 -3px 0 var(--pick);
+}
+
+.kanban-cover-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ---------- 比較ボード(全画面) ---------- */
+
+.compare-overlay:focus {
+  outline: none;
+}
+
+.compare-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.compare-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.compare-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 24px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.compare-heading {
+  min-width: 0;
+}
+
+.compare-heading h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.compare-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 6px;
+  color: var(--text-sub);
+  font-size: 13px;
+}
+
+.compare-summary strong {
+  color: var(--text);
+}
+
+.summary-good strong {
+  color: var(--ok);
+}
+
+.summary-out strong {
+  color: var(--danger);
+}
+
+.summary-pick {
+  color: var(--pick);
+  font-weight: 750;
+}
+
+.compare-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.compare-close {
+  font-size: 18px;
+}
+
+.compare-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  padding: 10px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.compare-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-sub);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.compare-size input[type="range"] {
+  width: 180px;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  min-height: 0;
+  accent-color: var(--accent);
+}
+
+.compare-size-value {
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 24px 48px;
+}
+
+.compare-grid {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, min(var(--compare-size, 280px), 100%));
+  justify-content: start;
+  align-items: start;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+}
+
+.compare-card {
+  container-type: inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.compare-card.is-good {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+}
+
+.compare-card.is-out {
+  opacity: 0.55;
+}
+
+.compare-card.is-out .compare-img {
+  filter: grayscale(0.75);
+}
+
+.compare-card.is-out:hover,
+.compare-card.is-out:focus-within {
+  opacity: 1;
+}
+
+.compare-card.is-picked {
+  border-color: var(--pick);
+  box-shadow: 0 0 0 3px var(--pick-ring), var(--shadow);
+}
+
+.compare-thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 72px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface-2);
+  cursor: zoom-in;
+}
+
+.compare-thumb:focus-visible {
+  outline-offset: -3px;
+}
+
+.compare-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: calc(var(--compare-size, 280px) * 1.4);
+  object-fit: contain;
+}
+
+/* 実際の表示サイズに近い小ささで見るときは、補助的な表示を省く */
+@container (max-width: 230px) {
+  .compare-source {
+    display: none;
+  }
+
+  .compare-card-foot {
+    justify-content: flex-end;
+  }
+
+  .compare-card-body {
+    padding: 8px;
+  }
+}
+
+/* 背景の切り替え(透過画像や、白/黒のページに置いたときの見え方を確かめる) */
+.bg-light .compare-thumb,
+.compare-focus.bg-light .compare-stage {
+  background: #ffffff;
+}
+
+.bg-dark .compare-thumb,
+.compare-focus.bg-dark .compare-stage {
+  background: #0f0f12;
+}
+
+.bg-checker .compare-thumb,
+.compare-focus.bg-checker .compare-stage {
+  background-color: var(--checker-a);
+  background-image: conic-gradient(var(--checker-b) 25%, transparent 0 50%, var(--checker-b) 0 75%, transparent 0);
+  background-size: 20px 20px;
+}
+
+.compare-no {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(16, 14, 24, 0.72);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+  box-shadow: var(--shadow-sm);
+}
+
+.badge-pick {
+  background: var(--pick);
+  color: var(--pick-contrast);
+}
+
+.badge-good {
+  background: var(--ok);
+  color: #ffffff;
+}
+
+.badge-out {
+  background: rgba(16, 14, 24, 0.72);
+  color: #ffffff;
+}
+
+.compare-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.compare-label {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 750;
+}
+
+.compare-label:hover {
+  border-color: var(--border);
+}
+
+.compare-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.mark-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-sub);
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.mark-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.mark-good[aria-pressed="true"] {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.mark-out[aria-pressed="true"] {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.mark-pick[aria-pressed="true"] {
+  background: var(--pick);
+  border-color: var(--pick);
+  color: var(--pick-contrast);
+}
+
+.compare-note {
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 8px;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.compare-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.compare-source {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-card-tools {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.compare-card-tools .btn-icon {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  text-decoration: none;
+}
+
+.compare-card-tools .btn-icon:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.compare-card-tools .delete-armed {
+  width: auto;
+  padding: 0 8px;
+  color: #ffffff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.compare-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.compare-add.is-empty {
+  grid-column: 1 / -1;
+  max-width: 640px;
+  width: 100%;
+  margin: 40px auto 0;
+}
+
+.compare-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: calc(min(var(--compare-size, 280px), 100%) * 0.62);
+  padding: 18px;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-sub);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.compare-add.is-empty .compare-dropzone {
+  min-height: 240px;
+}
+
+.compare-dropzone:hover {
+  border-color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.compare-dropzone-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.compare-dropzone-title {
+  color: var(--text);
+  font-weight: 750;
+}
+
+.compare-dropzone-hint {
+  font-size: 12px;
+}
+
+.compare-url-form {
+  display: flex;
+  gap: 6px;
+}
+
+.compare-url-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.compare-empty {
+  margin-top: 32px;
+  color: var(--text-sub);
+  text-align: center;
+}
+
+.compare-drop-hint {
+  display: none;
+}
+
+.compare-overlay.image-drop-over .compare-drop-hint {
+  position: absolute;
+  inset: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent-soft) 88%, transparent);
+  color: var(--accent);
+  font-size: 20px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+/* ---------- 拡大表示(常に暗い背景で画像を主役にする) ---------- */
+
+.compare-focus {
+  --surface: #1d1a27;
+  --surface-2: #262231;
+  --border: #383246;
+  --border-strong: #514960;
+  --text: #f3f0fa;
+  --text-sub: #b5aec7;
+  --text-faint: #918aa4;
+  --ok: #6ad6a0;
+  --ok-soft: rgba(65, 194, 128, 0.16);
+  --danger: #ff8594;
+  --danger-soft: rgba(255, 101, 123, 0.16);
+  --pick: #f2c14e;
+  --pick-contrast: #1d1600;
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  background: #0d0b12;
+  color: var(--text);
+}
+
+.compare-focus-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: #15121d;
+}
+
+.compare-focus-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 200px;
+  min-width: 0;
+  font-weight: 750;
+}
+
+.compare-focus-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-focus-title .compare-no {
+  position: static;
+}
+
+.compare-focus-count {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-stage {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: #0d0b12;
+}
+
+.compare-stage-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 12px 72px;
+  cursor: zoom-in;
+}
+
+.compare-focus-img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.compare-stage.is-actual {
+  overflow: auto;
+}
+
+.compare-stage.is-actual .compare-stage-inner {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  height: auto;
+  min-height: 100%;
+  cursor: zoom-out;
+}
+
+.compare-stage.is-actual .compare-focus-img {
+  max-width: none;
+  max-height: none;
+  margin: 0 auto;
+}
+
+.compare-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(20, 18, 28, 0.72);
+  color: #ffffff;
+  font-size: 28px;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.compare-nav:hover {
+  background: rgba(60, 52, 84, 0.9);
+}
+
+.compare-nav:disabled {
+  display: none;
+}
+
+.compare-nav.prev {
+  left: 14px;
+}
+
+.compare-nav.next {
+  right: 14px;
+}
+
+.compare-focus-note {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 8px 16px 0;
+  color: var(--text-sub);
+  font-size: 13px;
+  white-space: pre-wrap;
+  text-align: center;
+}
+
+.compare-filmstrip {
+  display: flex;
+  justify-content: safe center;
+  gap: 8px;
+  padding: 10px 16px 4px;
+  overflow-x: auto;
+}
+
+.compare-film {
+  position: relative;
+  flex: 0 0 auto;
+  width: 104px;
+  height: 64px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-2);
+  opacity: 0.7;
+}
+
+.compare-film:hover,
+.compare-film.is-current {
+  opacity: 1;
+}
+
+.compare-film.is-current {
+  border-color: #ffffff;
+}
+
+.compare-film.is-picked {
+  box-shadow: 0 0 0 2px var(--pick);
+}
+
+.compare-film.is-out {
+  opacity: 0.35;
+}
+
+.compare-film .compare-no {
+  top: 3px;
+  left: 3px;
+  min-width: 18px;
+  height: 18px;
+  font-size: 10.5px;
+}
+
+.compare-film-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.compare-keys {
+  padding: 4px 16px 10px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+/* ---------- 狭い画面 ---------- */
+
+@media (max-width: 720px) {
+  .compare-header {
+    flex-wrap: wrap;
+    padding: 12px 16px 10px;
+  }
+
+  .compare-heading {
+    flex: 1 1 0;
+  }
+
+  .compare-header-actions {
+    display: contents;
+  }
+
+  .compare-header-actions .btn {
+    order: 2;
+    flex: 1 1 100%;
+  }
+
+  .compare-focus-bar {
+    padding: 8px 12px;
+  }
+
+  .compare-heading h2 {
+    font-size: 17px;
+  }
+
+  .compare-toolbar {
+    padding: 8px 16px;
+  }
+
+  .compare-size input[type="range"] {
+    width: 120px;
+  }
+
+  .compare-body {
+    padding: 14px 16px 40px;
+  }
+
+  .compare-stage-inner {
+    padding: 8px 12px;
+  }
+
+  .compare-nav {
+    width: 40px;
+    height: 40px;
+    font-size: 24px;
+  }
+
+  .compare-nav.prev {
+    left: 6px;
+  }
+
+  .compare-nav.next {
+    right: 6px;
+  }
+
+  .compare-keys {
+    display: none;
+  }
+
+  .task-image-thumb:nth-child(n + 4) {
+    display: none;
+  }
+}
