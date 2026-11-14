@@ -43,6 +43,7 @@ const LEVEL_FIELDS = {
 
 const REPEAT_LABELS = { daily: '毎日', weekly: '毎週', monthly: '毎月' };
 
-// Todoタブの分類エリア。配置(列と並び順)はdata.todoLayoutに保存し、無い・壊れているときはこの既定に戻す
+// Todoタブの分類エリア。1列か2列で表示し、配置(列数・列と並び順)はdata.todoLayoutに保存し、無い・壊れているときはこの既定に戻す
 const TODO_GROUP_KEYS = ['today', 'limited', 'upcoming', 'recurring'];
 const DEFAULT_TODO_LAYOUT = [['today', 'limited'], ['upcoming', 'recurring']];
+const TODO_MAX_COLUMNS = 2;

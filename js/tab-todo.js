@@ -282,10 +282,15 @@ function renderTodo() {
           <span class="section-eyebrow">Tasks</span>
           <h2>タスク一覧</h2>
         </div>
-        <span class="task-overview">${active.length + inProgress.length + waitingReview.length}件の進行中タスク</span>
+        <div class="task-card-tools">
+          <div class="todo-column-switch" role="group" aria-label="分類エリアの列数">
+            ${[1, 2].map((count) => `<button class="btn${layout.length === count ? ' active' : ''}" type="button" data-action="set-todo-columns" data-columns="${count}" aria-pressed="${layout.length === count}">${count}列</button>`).join('')}
+          </div>
+          <span class="task-overview">${active.length + inProgress.length + waitingReview.length}件の進行中タスク</span>
+        </div>
       </div>
       ${todoFilterRow()}
-      <div class="todo-columns">
+      <div class="todo-columns todo-columns-${layout.length}">
         ${layout.map((keys, index) => `
           <div class="todo-column${keys.length ? '' : ' todo-column-empty'}" data-layout-column="${index}">
             ${keys.map((key) => todoTaskGroup(groups[key], now)).join('')}

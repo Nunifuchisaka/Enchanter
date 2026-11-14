@@ -79,6 +79,10 @@ document.addEventListener('click', (event) => {
       ui.tab = element.dataset.tab;
       clearEditing();
       break;
+    case 'set-todo-columns':
+      if (!setTodoColumnCount(Number(element.dataset.columns))) return;
+      save();
+      break;
     case 'reset-todo-layout':
       data.todoLayout = null;
       save();
