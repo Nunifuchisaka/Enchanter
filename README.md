@@ -140,7 +140,8 @@ node cli.js sum --from -7                          # 直近1週間の作業時�
   "projects": [{ "id": "...", "name": "...", "customId": "...", "clientId": "...", "color": "#7c5cff" }],
   "tasks": [{ "id": "...", "title": "...", "projectId": "...", "categoryId": "...", "status": "todo", "createdAt": 0, "completedAt": null, "plannedStart": "2026-07-05", "plannedEnd": "2026-07-07", "importance": 3, "weight": 2, "estimateMinutes": 120, "note": "自由記述メモ", "tags": ["デザイン", "急ぎ"], "links": [{ "url": "https://example.com/spec", "title": "仕様書" }], "subtasks": [{ "id": "...", "title": "...", "done": false }] }],
   "entries": [{ "id": "...", "taskId": "...", "start": 0, "end": null }],
-  "filters": [{ "id": "...", "name": "今週の高重要度", "clientId": null, "projectId": "...", "categoryId": null, "importance": "3", "weight": "", "month": "", "tag": "" }]
+  "filters": [{ "id": "...", "name": "今週の高重要度", "clientId": null, "projectId": "...", "categoryId": null, "importance": "3", "weight": "", "month": "", "tag": "" }],
+  "todoLayout": [["today", "limited"], ["upcoming", "recurring"]]
 }
 ```
 
@@ -155,6 +156,8 @@ node cli.js sum --from -7                          # 直近1週間の作業時�
 `categories` は「管理」タブで予め作成するカテゴリのマスタです。各タスクは`categoryId`でひとつのカテゴリを参照できます(未設定は`null`)。カテゴリを削除すると、参照していたタスクの`categoryId`は`null`(カテゴリなし)に戻ります。
 
 `filters` はTodo/カンバンタブの絞り込み条件を名前を付けて保存したものです。`clientId`/`projectId`/`categoryId`は対象なしを`null`で表し、`importance`/`weight`は`""`(すべて)/`"0"`〜`"3"`、`month`は`"YYYY-MM"`または`""`(指定なし)、`tag`はタグ名または`""`(指定なし)です。
+
+`todoLayout` はTodoタブの分類エリア(`today`=今日やる / `limited`=限定的なタスク / `upcoming`=開始前のタスク / `recurring`=恒常的なタスク)の配置で、左の列・右の列それぞれに上から並べるキーの配列です。各エリアの見出しの「⠿」をドラッグして(またはつまみにフォーカスして Alt+矢印キーで)動かすと保存されます。`null`や欠けたキーは既定の配置で補います。
 
 `entries` の `end: null` は計測中を表します。
 

@@ -69,6 +69,19 @@ function setTaskStatus(task, status) {
   return true;
 }
 
+// 分類エリアを移動する。columnIndexの列のbeforeKeyの直前(nullなら末尾)に入れ、変わったらtrue
+function moveTodoGroup(key, columnIndex, beforeKey) {
+  const current = normalizeTodoLayout(data.todoLayout);
+  if (!TODO_GROUP_KEYS.includes(key) || !current[columnIndex] || key === beforeKey) return false;
+  const next = current.map((column) => column.filter((item) => item !== key));
+  const target = next[columnIndex];
+  const index = beforeKey ? target.indexOf(beforeKey) : -1;
+  target.splice(index === -1 ? target.length : index, 0, key);
+  if (JSON.stringify(next) === JSON.stringify(current)) return false;
+  data.todoLayout = next;
+  return true;
+}
+
 // カンバンで複数タスクの並び順を変える。ドロップ先の前後にあるタスクのIDで位置を決める
 function reorderKanbanTask(task, status, beforeId, afterId) {
   const tasks = data.tasks.filter((item) => item.status === status && item.id !== task.id).sort(compareKanbanTasks);
