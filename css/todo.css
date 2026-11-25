@@ -559,6 +559,19 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
 }
 
+.timer-btn.resume {
+  padding: 6px 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--ok) 30%, var(--border));
+}
+
+.timer-btn.resume:hover {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
 .timer-btn.stop {
   border-color: var(--danger);
   color: var(--danger);

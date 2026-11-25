@@ -24,15 +24,36 @@ function undoDeletion() {
   save();
 }
 
-// 複数タスクの並行計測に対応(同じタスクの二重計測のみ防ぐ)
-function startTimer(taskId) {
+// 複数タスクの並行計測に対応(同じタスクの二重計測のみ防ぐ)。startは計測し忘れ用に過去の時刻を渡せる
+function startTimer(taskId, start = Date.now()) {
   if (runningEntryForTask(taskId)) return;
   const task = taskById(taskId);
   if (!task) return;
   if (task.status === 'todo') task.status = 'in_progress';
-  data.entries.push({ id: uid(), taskId, start: Date.now(), end: null });
+  data.entries.push({ id: uid(), taskId, start: Math.min(start, Date.now()), end: null });
   save();
   renderAll();
+}
+
+// 計測し忘れ用: 直前に終わった作業記録の終了時刻(どのタスクでもよい)。
+// 前日以前から遡ると日付をまたぐ長い記録になるため今日終わった分だけを対象にし、無ければnull
+function lastEntryEndToday(now = Date.now()) {
+  const dayStart = new Date(now);
+  dayStart.setHours(0, 0, 0, 0);
+  let latest = null;
+  for (const entry of data.entries) {
+    if (entry.end === null || entry.end > now || entry.end < dayStart.getTime()) continue;
+    if (latest === null || entry.end > latest) latest = entry.end;
+  }
+  return latest;
+}
+
+// 直前の計測の終了時刻から計測を始める。対象が無ければ何もせずfalse
+function startTimerFromLastEnd(taskId) {
+  const start = lastEntryEndToday();
+  if (start === null || runningEntryForTask(taskId)) return false;
+  startTimer(taskId, start);
+  return true;
 }
 
 function stopTimer(entryId) {

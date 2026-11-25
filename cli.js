@@ -28,7 +28,7 @@ const HELP = `Enchanter CLI (サーバー不要。起動中の画面には数秒
 編集  edit <id> [--title 新タイトル] [オプション]   値に - を渡すと消去
 状態  status <id> <todo|wip|review|done>   / done <id>   (完了で計測停止・繰り返し次回分を生成)
 今日  pin <id>  (☆今日やるの切替)
-計測  start <id> / stop [id] (省略で全停止) / running
+計測  start <id> [--last 直前の計測の終了時刻から(今日の分のみ。計測し忘れ用)] / stop [id] (省略で全停止) / running
 記録  log <id> <開始> <終了>   例: log ab12 10:00 11:30 / log ab12 11/5T10:00 11/5T12:00
 小項  sub <id> <タイトル> / subdone <id> <番号>
 画像  img <id>  (画像候補の一覧) / img <id> add <画像ファイル|フォルダ|URL>...
@@ -53,7 +53,7 @@ const VALUE_OPTIONS = {
   t: 'tags', tags: 'tags', tag: 'tags', note: 'note', l: 'links', link: 'links', unlink: 'unlink', r: 'repeat', repeat: 'repeat', title: 'title',
   q: 'query', s: 'status', status: 'status', n: 'limit', limit: 'limit', from: 'from', to: 'to',
 };
-const FLAG_OPTIONS = { a: 'all', all: 'all', done: 'doneOnly', today: 'today' };
+const FLAG_OPTIONS = { a: 'all', all: 'all', done: 'doneOnly', today: 'today', last: 'fromLast' };
 
 class CliError extends Error {}
 const fail = (message) => { throw new CliError(message); };
@@ -101,7 +101,7 @@ function loadLogic(rawData) {
     syncEntryToGoogle = (entry) => { if (entry && entry.end !== null) __synced.push(entry); };`, context);
   const logic = vm.runInContext(`({
     get data() { return data; }, uid, taskById, projectById, clientById, categoryById, runningEntries,
-    runningEntryForTask, startTimer, stopTimer, stopAllTimers, setTaskStatus, compareActiveTasks,
+    runningEntryForTask, startTimer, startTimerFromLastEnd, stopTimer, stopAllTimers, setTaskStatus, compareActiveTasks,
     taskImages, imageLabel, addTaskImages, toggleImageMark, togglePickImage, removeTaskImage,
     parseTags, parseLinks, parseLevel, parseEstimate, planLabel, isOverdue, isDueToday, todayStr, toDateStr,
     fromDateStr, addDays, entryDur, overlapMs, reportRangeMs, timeToTimestamp, googleEventTitle,
@@ -456,10 +456,14 @@ const COMMANDS = {
     return { changed: true, output: taskLine(L, task) };
   },
 
-  start(L, { positional }) {
+  start(L, { positional, options }) {
     const task = findTask(L, positional[0]);
     if (task.status === 'done') fail('完了済みのタスクは計測できません');
     if (L.runningEntryForTask(task.id)) return { output: `計測中です ${taskLine(L, task)}` };
+    if (options.fromLast) {
+      if (!L.startTimerFromLastEnd(task.id)) fail('今日終了した計測がないため遡れません');
+      return { changed: true, output: `${taskLine(L, task)} (${fmtDateTime(L, L.runningEntryForTask(task.id).start).slice(11)}から)` };
+    }
     L.startTimer(task.id);
     return { changed: true, output: taskLine(L, task) };
   },

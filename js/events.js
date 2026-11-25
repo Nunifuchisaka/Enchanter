@@ -303,6 +303,9 @@ document.addEventListener('click', (event) => {
     case 'start-timer':
       startTimer(id);
       return;
+    case 'start-timer-from-last':
+      startTimerFromLastEnd(id);
+      return;
     case 'stop-timer':
       stopTimer(id);
       break;
