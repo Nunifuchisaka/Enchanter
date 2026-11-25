@@ -70,6 +70,13 @@ function timerStartButton(task) {
   return `<button class="timer-btn start" data-action="start-timer" data-id="${esc(task.id)}">▶ 計測</button>`;
 }
 
+// 計測し忘れ用: 直前の計測が終わった時刻から始めるボタン(今日の終了記録が無ければ出さない)
+function timerResumeButton(task, lastEnd) {
+  if (lastEnd === null) return '';
+  const time = fmtTime(lastEnd);
+  return `<button class="timer-btn resume" data-action="start-timer-from-last" data-id="${esc(task.id)}" title="直前の計測が終わった${time}から計測を開始" aria-label="${esc(task.title)}を${time}から計測">⇤ ${time}〜</button>`;
+}
+
 function todoTimerControls(task, running, now) {
   if (task.status === 'done') return '';
   if (running && ui.editingEntry === running.id) {
@@ -87,7 +94,7 @@ function todoTimerControls(task, running, now) {
       ${timerStopButton(running, now)}
       <button class="btn-icon" data-action="edit-entry" data-id="${esc(running.id)}" title="開始時刻を編集" aria-label="${esc(task.title)}の開始時刻を編集">✎</button>`;
   }
-  return timerStartButton(task);
+  return timerStartButton(task) + timerResumeButton(task, lastEntryEndToday(now));
 }
 
 // タスク一覧の1行。編集中ならフォームに差し替える

@@ -497,3 +497,33 @@ test('unused image files are removed only when no data or backup refers to them'
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('todo rows offer starting from the end of the last entry finished today, and it starts there', () => {
+  const { run } = client();
+  run(`data.tasks = [
+    {id:'prev', title:'Prev task', status:'in_progress'},
+    {id:'next', title:'Next task', status:'todo'}
+  ];
+    const now = Date.now();
+    // 0時直後に実行しても今日の範囲に収まるようにする
+    __lastEnd = Math.max(now - 5 * 60000, new Date(now).setHours(0, 0, 0, 0));
+    data.entries = [
+      {id:'old', taskId:'prev', start: now - 3 * 86400000, end: now - 3 * 86400000 + 60000},
+      {id:'e1', taskId:'prev', start: __lastEnd - 60000, end: __lastEnd}
+    ];`);
+  const html = run('renderTodo()');
+  assert.ok(html.includes('data-action="start-timer-from-last" data-id="next"'));
+  assert.equal(run('startTimerFromLastEnd("next")'), true);
+  const entry = run('runningEntryForTask("next")');
+  assert.equal(entry.start, run('__lastEnd'));
+  assert.equal(run('taskById("next").status'), 'in_progress');
+});
+
+test('the resume button is hidden when nothing has finished today', () => {
+  const { run } = client();
+  run(`data.tasks = [{id:'next', title:'Next task', status:'todo'}];
+    data.entries = [{id:'old', taskId:'next', start: Date.now() - 3 * 86400000, end: Date.now() - 3 * 86400000 + 60000}];`);
+  assert.ok(!run('renderTodo()').includes('start-timer-from-last'));
+  assert.equal(run('startTimerFromLastEnd("next")'), false);
+  assert.equal(run('runningEntryForTask("next")'), null);
+});

@@ -210,3 +210,24 @@ test('img adds image files from a folder, marks and picks candidates, and reject
     fs.rmSync(source, { recursive: true, force: true });
   }
 });
+
+test('start --last starts from the end of the last entry finished today', () => {
+  const end = Math.max(Date.now() - 15 * 60000, new Date().setHours(0, 0, 0, 0)); // 0時直後でも今日に収める
+  const dir = tempDataDir({ ...SAMPLE, entries: [{ id: 'e1', taskId: 'aaa111', start: end - 60000, end }] });
+  try {
+    const started = cli(dir, 'start', 'aaa222', '--last');
+    assert.equal(started.code, 0, started.err);
+    const running = readFile(dir).entries.find((entry) => entry.end === null);
+    assert.equal(running.taskId, 'aaa222');
+    assert.equal(running.start, end);
+    const empty = tempDataDir(SAMPLE);
+    try {
+      assert.notEqual(cli(empty, 'start', 'aaa222', '--last').code, 0);
+      assert.equal(readFile(empty).entries.length, 0);
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
