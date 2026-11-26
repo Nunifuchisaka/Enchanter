@@ -35,21 +35,27 @@ function startTimer(taskId, start = Date.now()) {
   renderAll();
 }
 
-// 計測し忘れ用: 直前に終わった作業記録の終了時刻(どのタスクでもよい)。
+// 計測し忘れ用: 直前に終わった作業記録(どのタスクでもよい)。
 // 前日以前から遡ると日付をまたぐ長い記録になるため今日終わった分だけを対象にし、無ければnull
-function lastEntryEndToday(now = Date.now()) {
+function lastEndedEntryToday(now = Date.now()) {
   const dayStart = new Date(now);
   dayStart.setHours(0, 0, 0, 0);
   let latest = null;
   for (const entry of data.entries) {
     if (entry.end === null || entry.end > now || entry.end < dayStart.getTime()) continue;
-    if (latest === null || entry.end > latest) latest = entry.end;
+    if (latest === null || entry.end > latest.end) latest = entry;
   }
   return latest;
 }
 
-// 直前の計測の終了時刻から計測を始める。対象が無ければ何もせずfalse
+function lastEntryEndToday(now = Date.now()) {
+  const entry = lastEndedEntryToday(now);
+  return entry ? entry.end : null;
+}
+
+// 直前の計測の終了時刻から計測を始める。対象が無いか完了済みのタスクなら何もせずfalse
 function startTimerFromLastEnd(taskId) {
+  if (taskById(taskId)?.status === 'done') return false;
   const start = lastEntryEndToday();
   if (start === null || runningEntryForTask(taskId)) return false;
   startTimer(taskId, start);
