@@ -70,14 +70,17 @@ function timerStartButton(task) {
   return `<button class="timer-btn start" data-action="start-timer" data-id="${esc(task.id)}">▶ 計測</button>`;
 }
 
-// 計測し忘れ用: 直前の計測が終わった時刻から始めるボタン(今日の終了記録が無ければ出さない)
-function timerResumeButton(task, lastEnd) {
-  if (lastEnd === null) return '';
-  const time = fmtTime(lastEnd);
-  return `<button class="timer-btn resume" data-action="start-timer-from-last" data-id="${esc(task.id)}" title="直前の計測が終わった${time}から計測を開始" aria-label="${esc(task.title)}を${time}から計測">⇤ ${time}〜</button>`;
+// 計測し忘れ用: 直前の計測が終わった時刻から始めるボタン(今日の終了記録が無ければ出さない)。
+// 基準は並行計測中の別タスクの記録のこともあるので、ツールチップにそのタスク名を出す
+function timerResumeButton(task, lastEnded) {
+  if (lastEnded === null) return '';
+  const time = fmtTime(lastEnded.end);
+  const source = taskById(lastEnded.taskId);
+  const title = source ? `直前の計測(${source.title})が終わった${time}から計測を開始` : `直前の計測が終わった${time}から計測を開始`;
+  return `<button class="timer-btn resume" data-action="start-timer-from-last" data-id="${esc(task.id)}" title="${esc(title)}" aria-label="${esc(task.title)}を${time}から計測">⇤ ${time}〜</button>`;
 }
 
-function todoTimerControls(task, running, now) {
+function todoTimerControls(task, running, now, lastEnded) {
   if (task.status === 'done') return '';
   if (running && ui.editingEntry === running.id) {
     return `
@@ -94,11 +97,11 @@ function todoTimerControls(task, running, now) {
       ${timerStopButton(running, now)}
       <button class="btn-icon" data-action="edit-entry" data-id="${esc(running.id)}" title="開始時刻を編集" aria-label="${esc(task.title)}の開始時刻を編集">✎</button>`;
   }
-  return timerStartButton(task) + timerResumeButton(task, lastEntryEndToday(now));
+  return timerStartButton(task) + timerResumeButton(task, lastEnded);
 }
 
-// タスク一覧の1行。編集中ならフォームに差し替える
-function todoTaskRow(task, now) {
+// タスク一覧の1行。編集中ならフォームに差し替える。lastEndedは描画ごとに1回求めたlastEndedEntryToday()
+function todoTaskRow(task, now, lastEnded) {
   if (ui.editingTask === task.id) return todoTaskEditRow(task);
   const totalMs = data.entries
     .filter((entry) => entry.taskId === task.id)
@@ -126,7 +129,7 @@ function todoTaskRow(task, now) {
         ${subtaskBlockHtml(task)}
       </div>
       <div class="task-actions">
-        ${todoTimerControls(task, running, now)}
+        ${todoTimerControls(task, running, now, lastEnded)}
         ${task.status !== 'done' ? `<button class="btn" data-action="toggle-today" data-id="${esc(task.id)}" aria-pressed="${isToday}">${isToday ? '★ 今日やる' : '☆ 今日やる'}</button>` : ''}
         ${compareOpenButton(task)}
         <button class="btn-icon" data-action="edit-task" data-id="${esc(task.id)}" title="タスクを編集" aria-label="${esc(task.title)}を編集">✎</button>
@@ -147,13 +150,13 @@ function taskDeleteButtonHtml(task) {
 }
 
 // 状態ごとの節。未着手は常に出し、作業中・確認待ちは該当がある時だけ出す
-function todoTaskGroup(group, now) {
+function todoTaskGroup(group, now, lastEnded) {
   const byStatus = {
     todo: group.tasks.filter((task) => task.status === 'todo'),
     in_progress: group.tasks.filter((task) => task.status === 'in_progress'),
     waiting_review: group.tasks.filter((task) => task.status === 'waiting_review'),
   };
-  const rowsOf = (tasks) => tasks.map((task) => todoTaskRow(task, now)).join('');
+  const rowsOf = (tasks) => tasks.map((task) => todoTaskRow(task, now, lastEnded)).join('');
   return `
     <section class="task-group task-group-${group.key}" data-group-key="${group.key}">
       <div class="task-group-heading">
@@ -246,6 +249,8 @@ function todoCreateCard() {
 
 function renderTodo() {
   const now = Date.now();
+  // 行ごとに全記録を走査しないよう、計測し忘れボタンの基準はここで1回だけ求める
+  const lastEnded = lastEndedEntryToday(now);
   reconcileTodoProjectFilter();
 
   const tasks = applyTodoFilters(data.tasks);
@@ -297,7 +302,7 @@ function renderTodo() {
       <div class="todo-columns">
         ${layout.map((keys, index) => `
           <div class="todo-column${keys.length ? '' : ' todo-column-empty'}" data-layout-column="${index}">
-            ${keys.map((key) => todoTaskGroup(groups[key], now)).join('')}
+            ${keys.map((key) => todoTaskGroup(groups[key], now, lastEnded)).join('')}
             ${keys.length ? '' : '<p class="todo-column-hint">分類エリアをここへドラッグできます</p>'}
           </div>`).join('')}
       </div>
@@ -305,7 +310,7 @@ function renderTodo() {
       ${done.length ? `
         <details class="done-section" data-details-key="done-tasks"${ui.todoSearch ? ' open' : ''}>
           <summary><span class="status-dot status-done"></span>完了済み <span class="section-count">${done.length}</span></summary>
-          <ul class="task-list">${done.map((task) => todoTaskRow(task, now)).join('')}</ul>
+          <ul class="task-list">${done.map((task) => todoTaskRow(task, now, lastEnded)).join('')}</ul>
         </details>` : ''}
     </div>`;
 }

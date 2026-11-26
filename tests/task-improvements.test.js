@@ -513,10 +513,16 @@ test('todo rows offer starting from the end of the last entry finished today, an
     ];`);
   const html = run('renderTodo()');
   assert.ok(html.includes('data-action="start-timer-from-last" data-id="next"'));
+  // 基準にした記録のタスク名をツールチップに出す
+  assert.ok(html.includes('title="直前の計測(Prev task)が終わった'));
   assert.equal(run('startTimerFromLastEnd("next")'), true);
   const entry = run('runningEntryForTask("next")');
   assert.equal(entry.start, run('__lastEnd'));
   assert.equal(run('taskById("next").status'), 'in_progress');
+  // 完了済みのタスクは内部関数から呼んでも計測を始めない
+  run(`data.tasks.push({id:'fin', title:'Finished', status:'done'})`);
+  assert.equal(run('startTimerFromLastEnd("fin")'), false);
+  assert.equal(run('runningEntryForTask("fin")'), null);
 });
 
 test('the resume button is hidden when nothing has finished today', () => {
