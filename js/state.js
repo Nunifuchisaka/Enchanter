@@ -32,6 +32,8 @@ const ui = {
   editingProject: null,
   editingCategory: null,
   googleStatus: { configured: false, connected: false },
+  // Googleカレンダーへの同期に失敗した作業記録 [{ entryId, error, at }](ページを開いている間のみ。成功・再試行で消える)
+  googleSyncFailures: [],
   // 画像候補の比較ボード(js/image-compare.js)。開いているタスクのid・拡大表示中の候補のid
   compareTaskId: null,
   compareFocusId: null,
@@ -224,22 +226,53 @@ function googleEventTitle(task, project) {
   return `${projectName}：${taskTitle}`;
 }
 
-// 完了した作業記録をGoogleカレンダーに反映する(未連携なら何もしない、失敗しても計測機能はブロックしない)
-function syncEntryToGoogle(entry) {
+// 完了した作業記録をGoogleカレンダーに反映する(未連携なら何もしない)。
+// 計測や保存はブロックしないが、失敗はui.googleSyncFailuresに残してヘッダーに表示する。完了時に解決するPromiseを返す
+async function syncEntryToGoogle(entry) {
   if (!entry || entry.end === null || !ui.googleStatus.connected) return;
   const task = taskById(entry.taskId);
   const project = task ? projectById(task.projectId) : null;
-  fetch('/api/calendar/sync-entry', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
-    body: JSON.stringify({
-      entryId: entry.id,
-      title: googleEventTitle(task, project),
-      project: project ? project.name : null,
-      start: entry.start,
-      end: entry.end,
-    }),
-  }).catch((error) => console.warn('Googleカレンダーへの同期に失敗しました', error));
+  let error = null;
+  try {
+    const response = await fetch('/api/calendar/sync-entry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'enchanter' },
+      body: JSON.stringify({
+        entryId: entry.id,
+        title: googleEventTitle(task, project),
+        project: project ? project.name : null,
+        start: entry.start,
+        end: entry.end,
+      }),
+    });
+    if (response.status === 409) {
+      // サーバー側でトークンが失効・削除された。このままだと以後の同期が黙って止まるので連携し直しを促す
+      ui.googleStatus = { ...ui.googleStatus, connected: false };
+      error = 'Google連携が切れています。管理タブから連携し直してください';
+    } else if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      error = `${body.error || '同期に失敗しました'}(HTTP ${response.status})`;
+    }
+  } catch {
+    error = 'サーバーに接続できませんでした';
+  }
+  if (error) console.warn('Googleカレンダーへの同期に失敗しました', entry.id, error);
+  noteGoogleSyncResult(entry.id, error);
+}
+
+// 同期結果を記録し、失敗の一覧が変わりうるときだけヘッダーを描き直す
+function noteGoogleSyncResult(entryId, error) {
+  const before = ui.googleSyncFailures;
+  const rest = before.filter((failure) => failure.entryId !== entryId);
+  ui.googleSyncFailures = error ? [...rest, { entryId, error, at: Date.now() }] : rest;
+  if (before.length || ui.googleSyncFailures.length) renderRunningBox();
+}
+
+// 同期に失敗した作業記録をまとめて送り直す(削除済み・計測中に戻った記録は一覧から外す)
+async function retryGoogleSync() {
+  const entries = ui.googleSyncFailures.map((failure) => entryById(failure.entryId));
+  ui.googleSyncFailures = [];
+  await Promise.all(entries.filter((entry) => entry && entry.end !== null).map(syncEntryToGoogle));
 }
 
 async function connectGoogle() {

@@ -247,12 +247,13 @@ async function requestGoogleToken(params, label) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(params),
   });
-  if (!response.ok) throw new Error(`${label}: ${response.status}`);
+  if (!response.ok) throw Object.assign(new Error(`${label}: ${response.status}`), { status: response.status });
   return response.json();
 }
 
 // アクセストークンが有効ならそのまま返し、期限切れ間近なら refresh_token で更新する。
-// 未連携・更新失敗時は null(呼び出し側は「未連携」として扱う)。
+// 未連携、またはGoogleが更新を拒否した(refresh_tokenの失効など)ときは null(呼び出し側は「未連携」として扱う)。
+// 通信エラーなど一時的な失敗ではトークンを消さずに例外を投げる(1回の失敗で以後の同期がすべて止まらないように)。
 async function getValidAccessToken() {
   const creds = getGoogleCredentials();
   const token = getGoogleToken();
@@ -275,6 +276,7 @@ async function getValidAccessToken() {
     return updated.access_token;
   } catch (error) {
     console.error('Googleアクセストークンの更新に失敗しました', error);
+    if (error.status !== 400 && error.status !== 401) throw error;
     deleteGoogleToken();
     return null;
   }

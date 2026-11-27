@@ -379,6 +379,12 @@ document.addEventListener('click', (event) => {
     case 'google-disconnect':
       disconnectGoogle();
       return;
+    case 'google-retry-sync':
+      retryGoogleSync().then(renderAll);
+      break;
+    case 'google-dismiss-sync-failures':
+      ui.googleSyncFailures = [];
+      break;
     case 'export-report-csv':
       exportReportCsv();
       return;
@@ -752,8 +758,9 @@ document.addEventListener('submit', (event) => {
       return;
   }
   save();
-  renderAll();
+  // 同期は描画より先に始める(stopTimerと同じ順)。描画が例外で止まってもカレンダーへの反映は巻き添えにしない
   if (syncEntry) syncEntryToGoogle(syncEntry);
+  renderAll();
 });
 
 document.addEventListener('pointerdown', (event) => {
