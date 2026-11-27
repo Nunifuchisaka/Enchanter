@@ -532,4 +532,7 @@ test('the resume button is hidden when nothing has finished today', () => {
   assert.ok(!run('renderTodo()').includes('start-timer-from-last'));
   assert.equal(run('startTimerFromLastEnd("next")'), false);
   assert.equal(run('runningEntryForTask("next")'), null);
+  // lastEndedを渡さずに呼んでも例外にならずボタンを出さない
+  const controls = run('todoTimerControls(taskById("next"), null, Date.now())');
+  assert.ok(!controls.includes('start-timer-from-last'));
 });
