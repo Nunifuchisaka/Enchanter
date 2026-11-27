@@ -73,7 +73,7 @@ function timerStartButton(task) {
 // 計測し忘れ用: 直前の計測が終わった時刻から始めるボタン(今日の終了記録が無ければ出さない)。
 // 基準は並行計測中の別タスクの記録のこともあるので、ツールチップにそのタスク名を出す
 function timerResumeButton(task, lastEnded) {
-  if (lastEnded === null) return '';
+  if (!lastEnded) return '';
   const time = fmtTime(lastEnded.end);
   const source = taskById(lastEnded.taskId);
   const title = source ? `直前の計測(${source.title})が終わった${time}から計測を開始` : `直前の計測が終わった${time}から計測を開始`;

@@ -48,15 +48,10 @@ function lastEndedEntryToday(now = Date.now()) {
   return latest;
 }
 
-function lastEntryEndToday(now = Date.now()) {
-  const entry = lastEndedEntryToday(now);
-  return entry ? entry.end : null;
-}
-
 // 直前の計測の終了時刻から計測を始める。対象が無いか完了済みのタスクなら何もせずfalse
 function startTimerFromLastEnd(taskId) {
   if (taskById(taskId)?.status === 'done') return false;
-  const start = lastEntryEndToday();
+  const start = lastEndedEntryToday()?.end ?? null;
   if (start === null || runningEntryForTask(taskId)) return false;
   startTimer(taskId, start);
   return true;
