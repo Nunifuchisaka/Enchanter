@@ -34,7 +34,7 @@ function client() {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
     vm.runInContext(file === 'js/main.js' ? source.replace(/init\(\);\s*$/, '') : source, context, { filename: file });
   }
-  vm.runInContext('save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {};', context);
+  vm.runInContext('realSyncEntryToGoogle = syncEntryToGoogle; save = () => {}; renderAll = () => {}; syncEntryToGoogle = () => {};', context);
   return { context, listeners, run: (code) => vm.runInContext(code, context) };
 }
 
@@ -535,4 +535,67 @@ test('the resume button is hidden when nothing has finished today', () => {
   // lastEndedを渡さずに呼んでも例外にならずボタンを出さない
   const controls = run('todoTimerControls(taskById("next"), null, Date.now())');
   assert.ok(!controls.includes('start-timer-from-last'));
+});
+
+test('a form submit starts the calendar sync even if rendering throws', () => {
+  const { run, listeners } = client();
+  run(`data.entries = [{id:'r', taskId:'a', start:new Date('2020-01-01T10:00').getTime(), end:null}];
+    synced = []; syncEntryToGoogle = (entry) => synced.push(entry.id);
+    renderAll = () => { throw new Error('render failed'); };`);
+  const form = { dataset: { actionSubmit: 'stop-at', id: 'r' }, values: { end: '2020-01-01T11:00' } };
+  assert.throws(() => listeners.submit({ target: { closest: () => form }, preventDefault() {} }), /render failed/);
+  assert.equal(run('synced.join()'), 'r');
+});
+
+test('calendar sync failures are kept, shown in the header and manage tab, and cleared by a retry', async () => {
+  const { context, run } = client();
+  let respond;
+  context.fetch = async () => respond();
+  run(`syncEntryToGoogle = realSyncEntryToGoogle; boxRenders = 0; renderRunningBox = () => { boxRenders += 1; };
+    ui.googleStatus = { configured: true, connected: true };
+    data.tasks = [{id:'a', title:'<Alpha>', status:'todo'}];
+    data.entries = [
+      {id:'e1', taskId:'a', start:new Date('2020-01-01T10:00').getTime(), end:new Date('2020-01-01T11:00').getTime()},
+      {id:'e2', taskId:'a', start:new Date('2020-01-01T12:00').getTime(), end:new Date('2020-01-01T13:00').getTime()},
+    ];`);
+  const ok = () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
+
+  // 成功して失敗も無ければヘッダーは描き直さない
+  respond = ok;
+  await run('syncEntryToGoogle(data.entries[0])');
+  assert.equal(run('ui.googleSyncFailures.length'), 0);
+  assert.equal(run('boxRenders'), 0);
+  assert.equal(run('googleSyncWarningHtml()'), '');
+
+  // サーバーのエラー応答と通信エラーはどちらも失敗として残す
+  respond = () => ({ ok: false, status: 502, json: async () => ({ error: '同期に失敗しました' }) });
+  await run('syncEntryToGoogle(data.entries[0])');
+  respond = () => { throw new TypeError('Failed to fetch'); };
+  await run('syncEntryToGoogle(data.entries[1])');
+  assert.deepEqual(JSON.parse(run('JSON.stringify(ui.googleSyncFailures.map((f) => [f.entryId, f.error]))')), [
+    ['e1', '同期に失敗しました(HTTP 502)'],
+    ['e2', 'サーバーに接続できませんでした'],
+  ]);
+  assert.equal(run('boxRenders'), 2);
+  assert.ok(run('googleSyncWarningHtml()').includes('カレンダー同期失敗 2件'));
+  const card = run('manageGoogleCard()');
+  assert.ok(card.includes('&lt;Alpha&gt; 10:00〜11:00'));
+  assert.ok(card.includes('data-action="google-retry-sync"'));
+
+  // 同じ記録の再失敗は1件のまま、再試行で成功すれば消える
+  await run('syncEntryToGoogle(data.entries[1])');
+  assert.equal(run('ui.googleSyncFailures.length'), 2);
+  respond = ok;
+  await run('retryGoogleSync()');
+  assert.equal(run('ui.googleSyncFailures.length'), 0);
+  assert.equal(run('googleSyncWarningHtml()'), '');
+
+  // 連携が切れていたら(409)未連携に切り替え、再試行ボタンの代わりに連携し直しを促す
+  respond = () => ({ ok: false, status: 409, json: async () => ({ error: 'Google未連携です' }) });
+  await run('syncEntryToGoogle(data.entries[0])');
+  assert.equal(run('ui.googleStatus.connected'), false);
+  assert.match(run('ui.googleSyncFailures[0].error'), /連携し直してください/);
+  const disconnectedCard = run('manageGoogleCard()');
+  assert.ok(disconnectedCard.includes('data-action="google-connect"'));
+  assert.ok(!disconnectedCard.includes('google-retry-sync'));
 });

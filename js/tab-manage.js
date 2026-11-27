@@ -90,7 +90,27 @@ function manageGoogleCard() {
       <h2>🗓️ Googleカレンダー連携</h2>
       <p>${statusHtml}</p>
       ${actionHtml}
+      ${manageGoogleSyncFailuresHtml()}
     </div>`;
+}
+
+// 同期に失敗した作業記録の一覧。連携中なら再試行できる
+function manageGoogleSyncFailuresHtml() {
+  const failures = ui.googleSyncFailures;
+  if (!failures.length) return '';
+  const items = failures.map((failure) => {
+    const entry = entryById(failure.entryId);
+    const task = entry ? taskById(entry.taskId) : null;
+    const label = entry ? `${task ? task.title : '(削除済みタスク)'} ${fmtTime(entry.start)}〜${entry.end === null ? '' : fmtTime(entry.end)}` : '(削除済みの記録)';
+    return `<li>${esc(label)} <span class="sub">${esc(failure.error)}</span></li>`;
+  }).join('');
+  return `
+      <div class="sync-failures" role="alert">
+        <p>⚠ カレンダーへの同期に失敗した作業記録が${failures.length}件あります</p>
+        <ul>${items}</ul>
+        ${ui.googleStatus.connected ? '<button class="btn" data-action="google-retry-sync">再試行</button>' : ''}
+        <button class="btn btn-quiet" data-action="google-dismiss-sync-failures">通知を消す</button>
+      </div>`;
 }
 
 function manageBackupCard() {

@@ -102,15 +102,19 @@ function renderCompareRoot() {
 function renderRunningBox() {
   const box = document.getElementById('running-box');
   const running = runningEntries();
-  if (!running.length) {
-    box.innerHTML = '';
-    return;
-  }
   const pills = running.map(runningPillHtml).join('');
   const stopAll = running.length > 1
     ? '<button class="btn btn-quiet danger" data-action="stop-all-timers">すべて停止</button>'
     : '';
-  box.innerHTML = pills + stopAll;
+  box.innerHTML = pills + stopAll + googleSyncWarningHtml();
+}
+
+// Googleカレンダーへの同期に失敗した記録があるときだけ出す小さな警告。押すと管理タブ(詳細・再試行)へ
+function googleSyncWarningHtml() {
+  const failures = ui.googleSyncFailures;
+  if (!failures.length) return '';
+  const latest = failures[failures.length - 1];
+  return `<button class="sync-warning" data-action="tab" data-tab="manage" title="${esc(`${fmtTime(latest.at)} ${latest.error}`)}">⚠ カレンダー同期失敗 ${failures.length}件</button>`;
 }
 
 function runningPillHtml(entry) {

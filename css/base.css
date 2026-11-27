@@ -242,6 +242,20 @@ input[type="radio"] {
   animation: pulse 1.5s infinite;
 }
 
+/* Googleカレンダー同期の失敗(押すと管理タブへ) */
+.sync-warning {
+  min-width: max-content;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
